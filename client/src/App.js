@@ -128,16 +128,58 @@ function App() {
     setPlayerData(null);
 
     try {
-      const response = await axios.get(`${API_BASE_URL}/api/players/${username}`);
-      const fullData = response.data.data;
+      const response = await axios.get(`${API_BASE_URL}/api/players/${username}`, {
+        headers: {
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        },
+        validateStatus: (status) => status >= 200 && status < 400 // Accept 2xx and 3xx
+      });
+      
+      // Handle 304 Not Modified - might not have response body
+      if (response.status === 304) {
+        setError('Data not modified (cached). Please try again.');
+        setLoading(false);
+        return;
+      }
+      
+      // Handle different response structures
+      if (!response.data) {
+        setError('No data received from server');
+        setPlayerData(null);
+        setDataJson('');
+        return;
+      }
+      
+      const fullData = response.data?.data;
+      
+      if (fullData === undefined || fullData === null) {
+        setError('Player data not found or empty');
+        setPlayerData(null);
+        setDataJson('');
+        return;
+      }
+      
       setPlayerData(fullData);
       
       // Extract just the value for editing (Roblox API returns full entry with metadata)
-      const valueData = fullData.value || fullData;
+      // The data might be the value directly, or it might be wrapped in a 'value' property
+      let valueData = fullData;
+      if (fullData && typeof fullData === 'object' && 'value' in fullData) {
+        valueData = fullData.value;
+      }
+      
+      // Ensure valueData is not undefined before stringifying
+      if (valueData === undefined || valueData === null) {
+        valueData = {};
+      }
+      
       setDataJson(JSON.stringify(valueData, null, 2));
       setSuccess('Player data retrieved successfully!');
     } catch (err) {
-      setError(err.response?.data?.error || err.message || 'Failed to read player data');
+      console.error('Read error:', err);
+      const errorMessage = err.response?.data?.error || err.message || 'Failed to read player data';
+      setError(errorMessage);
       setPlayerData(null);
       setDataJson('');
     } finally {

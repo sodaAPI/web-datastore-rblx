@@ -69,15 +69,28 @@ module.exports = async (req, res) => {
       });
       
       let data = response.data;
+      
+      // Handle empty or undefined response
+      if (data === undefined || data === null) {
+        return res.status(404).json({
+          success: false,
+          error: 'Player data not found'
+        });
+      }
+      
+      // Try to parse as JSON, but keep as string if it fails
       try {
-        data = JSON.parse(response.data);
+        if (typeof data === 'string' && data.trim()) {
+          data = JSON.parse(data);
+        }
       } catch (parseError) {
         // leave as raw text if not JSON
+        console.log('Data is not JSON, keeping as text:', data);
       }
       
       return res.status(200).json({
         success: true,
-        data,
+        data: data || null,
       });
     }
 
