@@ -17,12 +17,19 @@ function Login({ onLogin }) {
     try {
       const response = await axios.post(
         `${API_BASE_URL}/api/auth/login`,
-        { username, password }
+        { username, password },
+        { withCredentials: true } // Important for session cookies (local dev)
       );
 
-      if (response.data.success && response.data.token) {
-        // Store token in localStorage
-        localStorage.setItem('authToken', response.data.token);
+      if (response.data.success) {
+        // Check if token-based auth (Vercel) or session-based (local dev)
+        if (response.data.token) {
+          // Token-based auth (Vercel) - store token
+          localStorage.setItem('authToken', response.data.token);
+        } else {
+          // Session-based auth (local dev) - token will be null, session cookie handles it
+          localStorage.removeItem('authToken'); // Clear any old token
+        }
         onLogin(response.data.username);
       } else {
         setError(response.data.error || 'Login failed');
@@ -40,8 +47,8 @@ function Login({ onLogin }) {
         <div className="login-container">
           <div className="login-card">
             <header className="header">
-              <h1>DataStore Manager</h1>
-              <p className="subtitle">Please login to continue</p>
+              <h1 style={{ color: 'blue' }}>DataStore Manager</h1>
+              <p className="subtitle" style={{ color: 'blue' }}>Please login to continue</p>
             </header>
 
             {error && <div className="alert alert-error">{error}</div>}

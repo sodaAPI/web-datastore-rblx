@@ -4,16 +4,19 @@ import './App.css';
 import { API_BASE_URL } from './config';
 import Login from './Login';
 
-// Configure axios to send auth token with all requests
+// Configure axios to send auth token with all requests (for Vercel)
+// Also enable credentials for session-based auth (local dev)
 const getAuthToken = () => localStorage.getItem('authToken');
 
-// Add token to all requests
+// Add token to all requests and enable credentials for sessions
 axios.interceptors.request.use(
   (config) => {
     const token = getAuthToken();
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+    // Always enable credentials to support session cookies (local dev)
+    config.withCredentials = true;
     return config;
   },
   (error) => {
@@ -41,25 +44,30 @@ function App() {
   }, []);
 
   const checkAuthentication = async () => {
-    const token = getAuthToken();
-    if (!token) {
-      setAuthenticated(false);
-      setCheckingAuth(false);
-      return;
-    }
-
     try {
+      // Try to check auth status (works for both token and session-based)
+      // withCredentials is already set globally in the axios interceptor
       const response = await axios.get(`${API_BASE_URL}/api/auth/check`);
+      
       if (response.data.authenticated) {
         setAuthenticated(true);
         setAuthUsername(response.data.username || '');
       } else {
         setAuthenticated(false);
-        localStorage.removeItem('authToken');
+        // Only remove token if we're using token-based auth
+        // For session-based, the session might just be expired
+        const token = getAuthToken();
+        if (token) {
+          localStorage.removeItem('authToken');
+        }
       }
     } catch (err) {
+      // Auth check failed - user is not authenticated
       setAuthenticated(false);
-      localStorage.removeItem('authToken');
+      const token = getAuthToken();
+      if (token) {
+        localStorage.removeItem('authToken');
+      }
     } finally {
       setCheckingAuth(false);
     }
@@ -143,6 +151,14 @@ function App() {
         return;
       }
       
+      // Check if response indicates failure
+      if (response.data && response.data.success === false) {
+        setError(response.data.error || 'Player data not found');
+        setPlayerData(null);
+        setDataJson('');
+        return;
+      }
+      
       // Handle different response structures
       if (!response.data) {
         setError('No data received from server');
@@ -153,10 +169,18 @@ function App() {
       
       const fullData = response.data?.data;
       
-      if (fullData === undefined || fullData === null) {
-        setError('Player data not found or empty');
+      // Only reject if data is truly missing (undefined, null, or empty string)
+      // Empty objects {} are valid data and should be accepted
+      const isMissing = 
+        fullData === undefined || 
+        fullData === null || 
+        fullData === '' ||
+        (typeof fullData === 'string' && fullData.trim() === '');
+      
+      if (isMissing) {
+        setError(`Player "${username}" has no data stored in the DataStore. Use "Create/Update" to add data.`);
         setPlayerData(null);
-        setDataJson('');
+        setDataJson('{}'); // Set empty JSON object for user to edit
         return;
       }
       
@@ -165,7 +189,7 @@ function App() {
       // Extract just the value for editing (Roblox API returns full entry with metadata)
       // The data might be the value directly, or it might be wrapped in a 'value' property
       let valueData = fullData;
-      if (fullData && typeof fullData === 'object' && 'value' in fullData) {
+      if (fullData && typeof fullData === 'object' && fullData !== null && 'value' in fullData) {
         valueData = fullData.value;
       }
       

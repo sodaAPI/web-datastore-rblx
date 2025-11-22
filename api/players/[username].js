@@ -62,36 +62,59 @@ module.exports = async (req, res) => {
 
     if (method === 'GET') {
       // GET - Read player data
-      const response = await axios.get(getV1EntryUrl(), {
-        headers: getHeaders(),
-        params: buildEntryParams(key),
-        responseType: 'text',
-      });
-      
-      let data = response.data;
-      
-      // Handle empty or undefined response
-      if (data === undefined || data === null) {
-        return res.status(404).json({
-          success: false,
-          error: 'Player data not found'
-        });
-      }
-      
-      // Try to parse as JSON, but keep as string if it fails
       try {
-        if (typeof data === 'string' && data.trim()) {
-          data = JSON.parse(data);
+        const response = await axios.get(getV1EntryUrl(), {
+          headers: getHeaders(),
+          params: buildEntryParams(key),
+          responseType: 'text',
+          validateStatus: (status) => status < 500, // Don't throw on 4xx, we'll handle it
+        });
+        
+        // Check if Roblox API returned an error status
+        if (response.status === 404) {
+          return res.status(404).json({
+            success: false,
+            error: `Player data not found for "${username}". The player may not have any data stored yet.`
+          });
         }
-      } catch (parseError) {
-        // leave as raw text if not JSON
-        console.log('Data is not JSON, keeping as text:', data);
+        
+        let data = response.data;
+        
+        // Handle empty string response (Roblox returns empty string when entry doesn't exist)
+        // Also handle cases where response.data might be undefined or null
+        if (data === undefined || data === null || data === '' || (typeof data === 'string' && data.trim() === '')) {
+          return res.status(404).json({
+            success: false,
+            error: `Player data not found for "${username}". The player may not have any data stored yet.`
+          });
+        }
+        
+        // Try to parse as JSON, but keep as string if it fails
+        let parsedData = data;
+        try {
+          if (typeof data === 'string' && data.trim()) {
+            parsedData = JSON.parse(data);
+          }
+        } catch (parseError) {
+          // leave as raw text if not JSON
+          console.log('Data is not JSON, keeping as text:', data);
+        }
+        
+        // Return the data as-is (even if it's an empty object, that's valid data)
+        return res.status(200).json({
+          success: true,
+          data: parsedData,
+        });
+      } catch (error) {
+        // Handle 404 from Roblox API
+        if (error.response?.status === 404) {
+          return res.status(404).json({
+            success: false,
+            error: 'Player data not found'
+          });
+        }
+        throw error; // Re-throw to be handled by outer catch
       }
-      
-      return res.status(200).json({
-        success: true,
-        data: data || null,
-      });
     }
 
     if (method === 'POST' || method === 'PUT') {
@@ -140,10 +163,11 @@ module.exports = async (req, res) => {
       });
     }
     
+    // Handle Roblox API 404 (entry doesn't exist)
     if (error.response?.status === 404) {
       return res.status(404).json({
         success: false,
-        error: 'Player data not found'
+        error: `Player data not found for "${username}". The player may not have any data stored yet.`
       });
     }
     
