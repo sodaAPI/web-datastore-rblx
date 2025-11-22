@@ -1,0 +1,722 @@
+const express = require('express');
+const cors = require('cors');
+const axios = require('axios');
+const session = require('express-session');
+require('dotenv').config();
+
+const app = express();
+const PORT = process.env.PORT || 5000;
+
+// Session configuration
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'your-secret-key-change-this-in-production',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production', // Use secure cookies in production (HTTPS)
+    httpOnly: true,
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+  }
+}));
+
+// Middleware
+app.use(cors({
+  origin: true, // Allow all origins (adjust for production)
+  credentials: true // Allow cookies
+}));
+app.use(express.json());
+
+// Import authentication
+const { authenticate, handleLogin, handleLogout, checkAuth } = require('./auth');
+
+// Roblox API configuration
+const ROBLOX_API_KEY = process.env.ROBLOX_API_KEY?.trim(); // Trim whitespace
+const UNIVERSE_ID = process.env.UNIVERSE_ID?.trim(); // Trim whitespace
+const DATASTORE_NAME = 'PlayerData';
+
+// ------------ Roblox Open Cloud DataStore API (v1 - documented/stable) ------------
+// Format: https://apis.roblox.com/datastores/v1/universes/{universeId}/standard-datastores
+const DATASTORE_V1_BASE = `https://apis.roblox.com/datastores/v1/universes/${UNIVERSE_ID}/standard-datastores`;
+const getV1EntryUrl = () => `${DATASTORE_V1_BASE}/datastore/entries/entry`;
+const getV1ListUrl = () => `${DATASTORE_V1_BASE}/datastore/entries`;
+
+const buildEntryParams = (key) => ({
+  datastoreName: DATASTORE_NAME,
+  scope: SCOPE,
+  entryKey: key,
+});
+
+const buildListParams = (cursor, limit) => ({
+  datastoreName: DATASTORE_NAME,
+  scope: SCOPE,
+  cursor,
+  limit,
+});
+
+// Helper to write (create/update) entries using v1 API
+const writeEntry = async (key, value, options = {}) => {
+  const params = {
+    ...buildEntryParams(key),
+  };
+
+  if (options.exclusiveCreate !== undefined) {
+    params.exclusiveCreate = options.exclusiveCreate;
+  }
+
+  if (options.matchVersion) {
+    params.matchVersion = options.matchVersion;
+  }
+
+  return axios.post(getV1EntryUrl(), value, {
+    headers: getHeaders(),
+    params,
+  });
+};
+
+// Validate and log API key on startup
+if (ROBLOX_API_KEY) {
+  console.log('API Key loaded:');
+  console.log('  Length:', ROBLOX_API_KEY.length);
+  console.log('  First 20 chars:', ROBLOX_API_KEY.substring(0, 20));
+  console.log('  Last 20 chars:', ROBLOX_API_KEY.substring(ROBLOX_API_KEY.length - 20));
+  console.log('  Contains newlines:', ROBLOX_API_KEY.includes('\n'));
+  console.log('  Contains spaces:', ROBLOX_API_KEY.includes(' '));
+  
+  // Warn if key seems too long (Roblox keys are typically 100-200 chars)
+  if (ROBLOX_API_KEY.length > 300) {
+    console.warn('⚠️  WARNING: API key seems unusually long. Make sure there are no extra characters or newlines.');
+  }
+} else {
+  console.error('❌ ERROR: ROBLOX_API_KEY not set in .env file');
+}
+
+// Helper function to get headers
+// Roblox Cloud API v2 uses x-api-key header (same as v1)
+const getHeaders = () => {
+  // Ensure API key is trimmed and has no extra whitespace
+  const apiKey = ROBLOX_API_KEY?.trim();
+  
+  if (!apiKey) {
+    console.error('❌ ERROR: API key is empty or not set');
+  }
+  
+  return {
+    'x-api-key': apiKey,
+    'Content-Type': 'application/json'
+  };
+};
+
+// Validate API key and universe ID on startup
+if (!ROBLOX_API_KEY || !UNIVERSE_ID) {
+  console.warn('⚠️  Warning: ROBLOX_API_KEY or UNIVERSE_ID not set in .env file');
+}
+
+// Helper function to convert username to userId using Roblox API
+const getUserIdFromUsername = async (username) => {
+  // If it's already a numeric string, assume it's a userId
+  if (/^\d+$/.test(username)) {
+    return username;
+  }
+  
+  // Trim and validate username
+  const cleanUsername = username.trim();
+  if (!cleanUsername) {
+    throw new Error('Username cannot be empty');
+  }
+  
+  try {
+    // Use Roblox Users API to get user by username
+    // This endpoint requires a POST request with JSON payload
+    const response = await axios.post('https://users.roblox.com/v1/usernames/users', {
+      usernames: [cleanUsername],
+      excludeBannedUsers: false
+    }, {
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    // Check response structure - the API returns data in response.data.data array
+    if (response.data && response.data.data && Array.isArray(response.data.data)) {
+      const users = response.data.data;
+      
+      // Find the user that matches the requested username (case-insensitive)
+      const matchedUser = users.find(user => {
+        const requestedName = user.requestedUsername || user.name || '';
+        return requestedName.toLowerCase() === cleanUsername.toLowerCase();
+      });
+      
+      if (matchedUser && matchedUser.id) {
+        return matchedUser.id.toString();
+      }
+    }
+    
+    // If no match found, try alternative response structure
+    if (response.data && response.data[0] && response.data[0].id) {
+      return response.data[0].id.toString();
+    }
+    
+    throw new Error(`User "${cleanUsername}" not found`);
+  } catch (error) {
+    // If it's a 404 or "not found" error, return a clear message
+    if (error.response?.status === 404 || error.message.includes('not found')) {
+      throw new Error(`User "${cleanUsername}" not found`);
+    }
+    
+    // Log the full error for debugging
+    console.error('Username conversion error for:', cleanUsername);
+    console.error('Error response:', error.response?.data);
+    console.error('Error status:', error.response?.status);
+    
+    // Extract error message from response
+    let errorMessage = error.message;
+    if (error.response?.data) {
+      if (error.response.data.errors && Array.isArray(error.response.data.errors)) {
+        errorMessage = error.response.data.errors[0]?.message || errorMessage;
+      } else if (error.response.data.message) {
+        errorMessage = error.response.data.message;
+      } else if (typeof error.response.data === 'string') {
+        errorMessage = error.response.data;
+      }
+    }
+    
+    throw new Error(`Failed to convert username to userId: ${errorMessage}`);
+  }
+};
+
+// Helper function to convert userId to username using Roblox API
+const getUsernameFromUserId = async (userId) => {
+  try {
+    // Use Roblox Users API to get user by userId
+    // Endpoint: GET https://users.roblox.com/v1/users/{userId}
+    const response = await axios.get(`https://users.roblox.com/v1/users/${userId}`);
+    
+    if (response.data && response.data.name) {
+      return response.data.name;
+    }
+    
+    return userId; // Fallback to userId if not found
+  } catch (error) {
+    console.error('Error converting userId to username:', userId, error.message);
+    return userId; // Fallback to userId on error
+  }
+};
+
+// Helper function to convert multiple userIds to usernames in batch
+const getUsernamesFromUserIds = async (userIds) => {
+  if (!userIds || userIds.length === 0) {
+    return [];
+  }
+  
+  try {
+    // Convert string userIds to integers and filter invalid ones
+    const userIdInts = userIds.map(id => parseInt(id)).filter(id => !isNaN(id));
+    
+    if (userIdInts.length === 0) {
+      return userIds; // Return original if no valid userIds
+    }
+    
+    // Use Roblox Users API to get users by userIds (batch request)
+    // Endpoint: POST https://users.roblox.com/v1/users with body: { userIds: [array] }
+    const batchSize = 100;
+    const usernameMap = new Map();
+    
+    for (let i = 0; i < userIdInts.length; i += batchSize) {
+      const batch = userIdInts.slice(i, i + batchSize);
+      
+      try {
+        // Try the POST endpoint with userIds array in body
+        const response = await axios.post('https://users.roblox.com/v1/users', {
+          userIds: batch
+        }, {
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        if (response.data?.data && Array.isArray(response.data.data)) {
+          response.data.data.forEach(user => {
+            if (user.id && user.name) {
+              usernameMap.set(user.id.toString(), user.name);
+            }
+          });
+        }
+      } catch (error) {
+        // If batch fails, try individual requests as fallback
+        console.error('Error in batch userId to username conversion, trying individual requests:', error.message);
+        for (const userId of batch) {
+          try {
+            const individualResponse = await axios.get(`https://users.roblox.com/v1/users/${userId}`);
+            if (individualResponse.data && individualResponse.data.name) {
+              usernameMap.set(userId.toString(), individualResponse.data.name);
+            }
+          } catch (individualError) {
+            // Skip this userId if it fails
+            console.error(`Failed to get username for userId ${userId}:`, individualError.message);
+          }
+        }
+      }
+    }
+    
+    // Map userIds to usernames, fallback to userId if not found
+    return userIds.map(userId => usernameMap.get(userId) || userId);
+  } catch (error) {
+    console.error('Error converting userIds to usernames:', error.message);
+    return userIds; // Fallback to original userIds on error
+  }
+};
+
+// Helper function to get player key
+// Note: Based on actual data, keys use "Player_" (capital P) and are in "global" scope
+// The userId parameter should be the numeric userId string
+const getPlayerKey = (userId) => `Player_${userId}`;
+const SCOPE = 'global'; // Default scope for entries
+
+// ============ Authentication Routes (Public) ============
+// Login endpoint
+app.post('/api/auth/login', handleLogin);
+
+// Logout endpoint
+app.post('/api/auth/logout', handleLogout);
+
+// Check authentication status
+app.get('/api/auth/check', checkAuth);
+
+// ============ Protected API Routes ============
+// All player data routes require authentication
+// GET - Read player data
+app.get('/api/players/:username', authenticate, async (req, res) => {
+  try {
+    const { username } = req.params;
+    // Convert username to userId
+    const userId = await getUserIdFromUsername(username);
+    const key = getPlayerKey(userId);
+    
+    const response = await axios.get(getV1EntryUrl(), {
+      headers: getHeaders(),
+      params: buildEntryParams(key),
+      responseType: 'text',
+    });
+    
+    let data = response.data;
+    try {
+      data = JSON.parse(response.data);
+    } catch (parseError) {
+      // leave as raw text if not JSON
+    }
+    
+    res.json({
+      success: true,
+      data,
+    });
+  } catch (error) {
+    // Check if error is from username conversion
+    if (error.message && (error.message.includes('not found') || error.message.includes('convert username'))) {
+      return res.status(404).json({
+        success: false,
+        error: error.message
+      });
+    }
+    
+    if (error.response?.status === 404) {
+      return res.status(404).json({
+        success: false,
+        error: 'Player data not found'
+      });
+    }
+    
+    // Extract error message from various possible response formats
+    let errorMessage = 'Failed to read player data';
+    if (error.response?.data) {
+      errorMessage = error.response.data.message || 
+                    error.response.data.error || 
+                    error.response.data.errorMessage ||
+                    JSON.stringify(error.response.data);
+      
+      // Log full error for debugging
+      console.error('\n=== API Error Details ===');
+      console.error('Status:', error.response.status);
+      console.error('Status Text:', error.response.statusText);
+      console.error('Response Data:', JSON.stringify(error.response.data, null, 2));
+      console.error('Request URL:', error.config?.url);
+      console.error('Request Headers:', JSON.stringify({ ...error.config?.headers, 'x-api-key': '***HIDDEN***' }, null, 2));
+    } else {
+      console.error('Request Error:', error.message);
+    }
+    
+    res.status(error.response?.status || 500).json({
+      success: false,
+      error: errorMessage,
+      status: error.response?.status,
+      details: error.response?.data
+    });
+  }
+});
+
+// POST - Create/Update player data
+app.post('/api/players/:username', authenticate, async (req, res) => {
+  try {
+    const { username } = req.params;
+    const { data } = req.body;
+    // Convert username to userId
+    const userId = await getUserIdFromUsername(username);
+    const key = getPlayerKey(userId);
+    
+    if (!data) {
+      return res.status(400).json({
+        success: false,
+        error: 'Data is required'
+      });
+    }
+    
+    const response = await writeEntry(key, data);
+    
+    res.json({
+      success: true,
+      data: response.data || {},
+      message: 'Player data saved successfully'
+    });
+  } catch (error) {
+    // Check if error is from username conversion
+    if (error.message && (error.message.includes('not found') || error.message.includes('convert username'))) {
+      return res.status(404).json({
+        success: false,
+        error: error.message
+      });
+    }
+    
+    // Extract error message from various possible response formats
+    let errorMessage = 'Failed to create/update player data';
+    if (error.response?.data) {
+      errorMessage = error.response.data.message || 
+                    error.response.data.error || 
+                    error.response.data.errorMessage ||
+                    JSON.stringify(error.response.data);
+      
+      // Log full error for debugging
+      console.error('\n=== API Error Details ===');
+      console.error('Status:', error.response.status);
+      console.error('Status Text:', error.response.statusText);
+      console.error('Response Data:', JSON.stringify(error.response.data, null, 2));
+      console.error('Request URL:', error.config?.url);
+      console.error('Request Headers:', JSON.stringify({ ...error.config?.headers, 'x-api-key': '***HIDDEN***' }, null, 2));
+    } else {
+      console.error('Request Error:', error.message);
+    }
+    
+    res.status(error.response?.status || 500).json({
+      success: false,
+      error: errorMessage,
+      status: error.response?.status,
+      details: error.response?.data
+    });
+  }
+});
+
+// PUT - Update player data
+// Note: Since POST works for create/update, we'll just use POST internally
+// This keeps the API consistent - PUT endpoint uses POST logic
+app.put('/api/players/:username', authenticate, async (req, res) => {
+  try {
+    const { username } = req.params;
+    const { data } = req.body;
+    // Convert username to userId
+    const userId = await getUserIdFromUsername(username);
+    const key = getPlayerKey(userId);
+    
+    if (!data) {
+      return res.status(400).json({
+        success: false,
+        error: 'Data is required'
+      });
+    }
+    
+    const response = await writeEntry(key, data);
+    
+    res.json({
+      success: true,
+      data: response.data || {},
+      message: 'Player data updated successfully'
+    });
+  } catch (error) {
+    // Check if error is from username conversion
+    if (error.message && (error.message.includes('not found') || error.message.includes('convert username'))) {
+      return res.status(404).json({
+        success: false,
+        error: error.message
+      });
+    }
+    
+    // Extract error message from various possible response formats
+    let errorMessage = 'Failed to update player data';
+    if (error.response?.data) {
+      const errors = error.response.data.errors || [];
+      if (errors.length > 0 && errors[0].message) {
+        errorMessage = errors[0].message;
+      } else {
+        errorMessage = error.response.data.message || 
+                      error.response.data.error || 
+                      error.response.data.errorMessage ||
+                      JSON.stringify(error.response.data);
+      }
+      
+      // Log full error for debugging
+      console.error('\n=== PUT Error Details ===');
+      console.error('Status:', error.response.status);
+      console.error('Status Text:', error.response.statusText);
+      console.error('Response Data:', JSON.stringify(error.response.data, null, 2));
+      console.error('Request URL:', error.config?.url);
+      console.error('Request Method:', error.config?.method);
+      console.error('Request Headers:', JSON.stringify({ ...error.config?.headers, 'x-api-key': '***HIDDEN***' }, null, 2));
+      console.error('Request Data:', JSON.stringify(error.config?.data, null, 2));
+    } else {
+      console.error('Request Error:', error.message);
+      console.error('Error Stack:', error.stack);
+    }
+    
+    res.status(error.response?.status || 500).json({
+      success: false,
+      error: errorMessage,
+      status: error.response?.status,
+      details: error.response?.data
+    });
+  }
+});
+
+// DELETE - Delete player data
+app.delete('/api/players/:username', authenticate, async (req, res) => {
+  try {
+    const { username } = req.params;
+    // Convert username to userId
+    const userId = await getUserIdFromUsername(username);
+    const key = getPlayerKey(userId);
+    
+    await axios.delete(getV1EntryUrl(), {
+      headers: getHeaders(),
+      params: buildEntryParams(key),
+    });
+    
+    res.json({
+      success: true,
+      message: 'Player data deleted successfully'
+    });
+  } catch (error) {
+    // Check if error is from username conversion
+    if (error.message && (error.message.includes('not found') || error.message.includes('convert username'))) {
+      return res.status(404).json({
+        success: false,
+        error: error.message
+      });
+    }
+    
+    if (error.response?.status === 404) {
+      return res.status(404).json({
+        success: false,
+        error: 'Player data not found'
+      });
+    }
+    
+    // Extract error message from various possible response formats
+    let errorMessage = 'Failed to delete player data';
+    if (error.response?.data) {
+      errorMessage = error.response.data.message || 
+                    error.response.data.error || 
+                    error.response.data.errorMessage ||
+                    JSON.stringify(error.response.data);
+      
+      // Log full error for debugging
+      console.error('\n=== API Error Details ===');
+      console.error('Status:', error.response.status);
+      console.error('Status Text:', error.response.statusText);
+      console.error('Response Data:', JSON.stringify(error.response.data, null, 2));
+      console.error('Request URL:', error.config?.url);
+      console.error('Request Headers:', JSON.stringify({ ...error.config?.headers, 'x-api-key': '***HIDDEN***' }, null, 2));
+    } else {
+      console.error('Request Error:', error.message);
+    }
+    
+    res.status(error.response?.status || 500).json({
+      success: false,
+      error: errorMessage,
+      status: error.response?.status,
+      details: error.response?.data
+    });
+  }
+});
+
+// GET - List all players (using ListEntries endpoint)
+app.get('/api/players', authenticate, async (req, res) => {
+  try {
+    const { cursor, limit = 50 } = req.query;
+    
+    const params = {
+      datastoreName: DATASTORE_NAME,
+      scope: SCOPE,
+      limit,
+      cursor,
+    };
+    
+    const response = await axios.get(getV1ListUrl(), {
+      headers: getHeaders(),
+      params,
+    });
+    
+    // Handle both response formats: entries array or keys array
+    let entries = response.data?.entries || [];
+    let userIds = [];
+    
+    if (entries.length > 0) {
+      // Format 1: entries array with entryKey property
+      userIds = entries.map((entry) => {
+        const match = entry.entryKey?.match(/Player_(\d+)/);
+        return match ? match[1] : entry.entryKey;
+      });
+    } else if (response.data?.keys && response.data.keys.length > 0) {
+      // Format 2: keys array directly
+      entries = response.data.keys;
+      userIds = response.data.keys.map((keyObj) => {
+        // Handle both string keys and object keys with 'key' property
+        const key = typeof keyObj === 'string' ? keyObj : keyObj.key || keyObj.entryKey;
+        const match = key?.match(/Player_(\d+)/);
+        return match ? match[1] : key;
+      });
+    }
+    
+    // Convert userIds to usernames
+    const usernames = await getUsernamesFromUserIds(userIds);
+    
+    res.json({
+      success: true,
+      data: {
+        keys: usernames, // Return usernames instead of userIds
+        userIds: userIds, // Also include userIds for reference
+        entries,
+        nextPageToken: response.data?.nextPageCursor || null,
+        original: response.data,
+      },
+    });
+  } catch (error) {
+    // Extract error message from various possible response formats
+    let errorMessage = 'Failed to list players';
+    if (error.response?.data) {
+      errorMessage = error.response.data.message || 
+                    error.response.data.error || 
+                    error.response.data.errorMessage ||
+                    JSON.stringify(error.response.data);
+      
+      // Log full error for debugging
+      console.error('\n=== API Error Details ===');
+      console.error('Status:', error.response.status);
+      console.error('Status Text:', error.response.statusText);
+      console.error('Response Data:', JSON.stringify(error.response.data, null, 2));
+      console.error('Request URL:', error.config?.url);
+      console.error('Request Headers:', JSON.stringify({ ...error.config?.headers, 'x-api-key': '***HIDDEN***' }, null, 2));
+    } else {
+      console.error('Request Error:', error.message);
+    }
+    
+    res.status(error.response?.status || 500).json({
+      success: false,
+      error: errorMessage,
+      status: error.response?.status,
+      details: error.response?.data
+    });
+  }
+});
+
+// Health check
+app.get('/api/health', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    message: 'Server is running',
+    config: {
+      universeId: UNIVERSE_ID,
+      datastoreName: DATASTORE_NAME,
+      apiKeyConfigured: !!ROBLOX_API_KEY,
+      apiKeyLength: ROBLOX_API_KEY ? ROBLOX_API_KEY.length : 0
+    }
+  });
+});
+
+// Test endpoint to verify API key and configuration
+app.get('/api/test', async (req, res) => {
+  try {
+    // Test with a simple list operation to verify API key works
+    const testUrl = `${getV1ListUrl()}?limit=1`;
+    
+    const config = {
+      headers: getHeaders(),
+      validateStatus: () => true // Don't throw on any status
+    };
+    
+    console.log('\n=== API Key Test ===');
+    console.log('Test URL:', testUrl);
+    console.log('Method: GET');
+    console.log('Universe ID:', UNIVERSE_ID);
+    console.log('DataStore Name:', DATASTORE_NAME);
+    console.log('API Key Present:', ROBLOX_API_KEY ? 'YES' : 'NO');
+    console.log('API Key Length:', ROBLOX_API_KEY ? ROBLOX_API_KEY.length : 0);
+    console.log('API Key First 10 chars:', ROBLOX_API_KEY ? ROBLOX_API_KEY.substring(0, 10) + '...' : 'N/A');
+    console.log('API Key Last 10 chars:', ROBLOX_API_KEY ? '...' + ROBLOX_API_KEY.substring(ROBLOX_API_KEY.length - 10) : 'N/A');
+    console.log('Headers:', JSON.stringify({ ...config.headers, 'x-api-key': '***HIDDEN***' }, null, 2));
+    
+    const response = await axios.get(testUrl, config);
+    
+    console.log('\n=== Response ===');
+    console.log('Status:', response.status);
+    console.log('Status Text:', response.statusText);
+    console.log('Response Data:', JSON.stringify(response.data, null, 2));
+    
+    res.json({
+      success: response.status >= 200 && response.status < 300,
+      status: response.status,
+      statusText: response.statusText,
+      data: response.data,
+      config: {
+        url: testUrl,
+        universeId: UNIVERSE_ID,
+        datastoreName: DATASTORE_NAME,
+        apiKeyConfigured: !!ROBLOX_API_KEY,
+        apiKeyLength: ROBLOX_API_KEY ? ROBLOX_API_KEY.length : 0
+      },
+      message: response.status >= 200 && response.status < 300 
+        ? 'API key test successful!' 
+        : `API key test failed with status ${response.status}. Check the error details above.`
+    });
+  } catch (error) {
+    console.error('\n=== Test Error ===');
+    console.error('Error Message:', error.message);
+    if (error.response) {
+      console.error('Response Status:', error.response.status);
+      console.error('Response Status Text:', error.response.statusText);
+      console.error('Response Data:', JSON.stringify(error.response.data, null, 2));
+      console.error('Response Headers:', JSON.stringify(error.response.headers, null, 2));
+    }
+    if (error.config) {
+      console.error('Request URL:', error.config.url);
+      console.error('Request Method:', error.config.method);
+    }
+    
+    res.json({
+      success: false,
+      error: error.message,
+      response: error.response?.data,
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      config: {
+        url: error.config?.url,
+        method: error.config?.method,
+        universeId: UNIVERSE_ID,
+        datastoreName: DATASTORE_NAME,
+        apiKeyConfigured: !!ROBLOX_API_KEY,
+        apiKeyLength: ROBLOX_API_KEY ? ROBLOX_API_KEY.length : 0
+      }
+    });
+  }
+});
+
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+  console.log(`Make sure ROBLOX_API_KEY and UNIVERSE_ID are set in .env file`);
+});
+
