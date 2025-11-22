@@ -206,6 +206,54 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
+// Authentication helper for token-based auth
+const crypto = require('crypto');
+const SESSION_SECRET = process.env.SESSION_SECRET || 'default-secret-change-in-production';
+
+function verifyToken(token) {
+  try {
+    if (!token) return null;
+    
+    const decoded = JSON.parse(Buffer.from(token, 'base64').toString());
+    const { signature, ...payload } = decoded;
+    
+    const expectedSignature = crypto
+      .createHmac('sha256', SESSION_SECRET)
+      .update(JSON.stringify(payload))
+      .digest('hex');
+    
+    if (signature !== expectedSignature) {
+      return null;
+    }
+    
+    // Check if token is expired (24 hours)
+    const maxAge = 24 * 60 * 60 * 1000; // 24 hours
+    if (Date.now() - decoded.timestamp > maxAge) {
+      return null;
+    }
+    
+    return decoded;
+  } catch (error) {
+    return null;
+  }
+}
+
+function authenticate(req) {
+  // Get token from Authorization header or query parameter
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') 
+    ? authHeader.substring(7)
+    : req.query.token || req.body?.token;
+  
+  const decoded = verifyToken(token);
+  
+  if (!decoded) {
+    return { authenticated: false, error: 'Unauthorized - Please login' };
+  }
+  
+  return { authenticated: true, username: decoded.username };
+}
+
 module.exports = {
   ROBLOX_API_KEY,
   UNIVERSE_ID,
@@ -222,5 +270,7 @@ module.exports = {
   getUsernamesFromUserIds,
   getPlayerKey,
   corsHeaders,
+  authenticate,
+  verifyToken,
 };
 

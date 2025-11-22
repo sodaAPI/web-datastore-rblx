@@ -7,6 +7,7 @@ const {
   getUserIdFromUsername,
   getPlayerKey,
   corsHeaders,
+  authenticate,
 } = require('../utils');
 
 module.exports = async (req, res) => {
@@ -19,6 +20,18 @@ module.exports = async (req, res) => {
   Object.keys(corsHeaders).forEach(key => {
     res.setHeader(key, corsHeaders[key]);
   });
+
+  // Check authentication for write/delete operations
+  if (req.method !== 'GET') {
+    const auth = authenticate(req);
+    if (!auth.authenticated) {
+      return res.status(401).json({
+        success: false,
+        error: auth.error,
+        requiresAuth: true
+      });
+    }
+  }
 
   // Extract username from URL path (Vercel dynamic route)
   // The file is at /api/players/[username].js, so the param is in the URL

@@ -4,8 +4,22 @@ import './App.css';
 import { API_BASE_URL } from './config';
 import Login from './Login';
 
-// Configure axios to send credentials (cookies) with all requests
-axios.defaults.withCredentials = true;
+// Configure axios to send auth token with all requests
+const getAuthToken = () => localStorage.getItem('authToken');
+
+// Add token to all requests
+axios.interceptors.request.use(
+  (config) => {
+    const token = getAuthToken();
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
 
 function App() {
   const [authenticated, setAuthenticated] = useState(false);
@@ -27,16 +41,25 @@ function App() {
   }, []);
 
   const checkAuthentication = async () => {
+    const token = getAuthToken();
+    if (!token) {
+      setAuthenticated(false);
+      setCheckingAuth(false);
+      return;
+    }
+
     try {
-      const response = await axios.get(`${API_BASE_URL}/api/auth/check`, { withCredentials: true });
+      const response = await axios.get(`${API_BASE_URL}/api/auth/check`);
       if (response.data.authenticated) {
         setAuthenticated(true);
         setAuthUsername(response.data.username || '');
       } else {
         setAuthenticated(false);
+        localStorage.removeItem('authToken');
       }
     } catch (err) {
       setAuthenticated(false);
+      localStorage.removeItem('authToken');
     } finally {
       setCheckingAuth(false);
     }
@@ -49,10 +72,11 @@ function App() {
 
   const handleLogout = async () => {
     try {
-      await axios.post(`${API_BASE_URL}/api/auth/logout`, {}, { withCredentials: true });
+      await axios.post(`${API_BASE_URL}/api/auth/logout`);
     } catch (err) {
       console.error('Logout error:', err);
     } finally {
+      localStorage.removeItem('authToken');
       setAuthenticated(false);
       setAuthUsername('');
     }
@@ -64,6 +88,7 @@ function App() {
       (response) => response,
       (error) => {
         if (error.response?.status === 401 && error.response?.data?.requiresAuth) {
+          localStorage.removeItem('authToken');
           setAuthenticated(false);
           setAuthUsername('');
         }
@@ -103,7 +128,7 @@ function App() {
     setPlayerData(null);
 
     try {
-      const response = await axios.get(`${API_BASE_URL}/api/players/${username}`, { withCredentials: true });
+      const response = await axios.get(`${API_BASE_URL}/api/players/${username}`);
       const fullData = response.data.data;
       setPlayerData(fullData);
       
@@ -143,7 +168,7 @@ function App() {
     setSuccess('');
 
     try {
-      await axios.post(`${API_BASE_URL}/api/players/${username}`, { data: valueToSend }, { withCredentials: true });
+      await axios.post(`${API_BASE_URL}/api/players/${username}`, { data: valueToSend });
       setSuccess('Player data created/updated successfully!');
       handleRead(); // Refresh the data
     } catch (err) {
@@ -176,7 +201,7 @@ function App() {
     setSuccess('');
 
     try {
-      const response = await axios.put(`${API_BASE_URL}/api/players/${username}`, { data: valueToSend }, { withCredentials: true });
+      const response = await axios.put(`${API_BASE_URL}/api/players/${username}`, { data: valueToSend });
       setSuccess(response.data?.message || 'Player data updated successfully!');
       handleRead(); // Refresh the data
     } catch (err) {
@@ -203,7 +228,7 @@ function App() {
     setSuccess('');
 
     try {
-      await axios.delete(`${API_BASE_URL}/api/players/${username}`, { withCredentials: true });
+      await axios.delete(`${API_BASE_URL}/api/players/${username}`);
       setSuccess('Player data deleted successfully!');
       setPlayerData(null);
       setDataJson('');
@@ -221,7 +246,7 @@ function App() {
 
     try {
       const params = cursor ? { cursor } : {};
-      const response = await axios.get(`${API_BASE_URL}/api/players`, { params, withCredentials: true });
+      const response = await axios.get(`${API_BASE_URL}/api/players`, { params });
       // Keys are now usernames (converted from userIds on server)
       const usernames = response.data.data?.keys || response.data.data?.dataStoreEntries?.map(e => e.id) || [];
       setPlayersList(usernames);

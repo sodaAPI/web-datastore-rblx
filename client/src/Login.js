@@ -17,11 +17,12 @@ function Login({ onLogin }) {
     try {
       const response = await axios.post(
         `${API_BASE_URL}/api/auth/login`,
-        { username, password },
-        { withCredentials: true } // Important for session cookies
+        { username, password }
       );
 
-      if (response.data.success) {
+      if (response.data.success && response.data.token) {
+        // Store token in localStorage
+        localStorage.setItem('authToken', response.data.token);
         onLogin(response.data.username);
       } else {
         setError(response.data.error || 'Login failed');

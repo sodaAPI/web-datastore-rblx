@@ -4,6 +4,7 @@ const {
   getHeaders,
   getUsernamesFromUserIds,
   corsHeaders,
+  authenticate,
   DATASTORE_NAME,
   SCOPE,
 } = require('./utils');
@@ -23,6 +24,16 @@ module.exports = async (req, res) => {
     return res.status(405).json({
       success: false,
       error: 'Method not allowed'
+    });
+  }
+
+  // Check authentication
+  const auth = authenticate(req);
+  if (!auth.authenticated) {
+    return res.status(401).json({
+      success: false,
+      error: auth.error,
+      requiresAuth: true
     });
   }
 
