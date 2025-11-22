@@ -4,6 +4,27 @@ A modern web interface for managing CRUD operations on Roblox DataStore entries.
 
 > **Having authentication issues?** See [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) for step-by-step solutions to "Not authorized" (401) errors.
 
+## Table of Contents
+
+- [Features](#features)
+- [Prerequisites](#prerequisites)
+- [Setup Instructions](#setup-instructions)
+  - [1. Get Your Roblox API Credentials](#1-get-your-roblox-api-credentials)
+  - [2. Install Dependencies](#2-install-dependencies)
+  - [3. Configure Environment Variables](#3-configure-environment-variables)
+  - [4. Configure API URL (Optional)](#4-configure-api-url-optional)
+- [Running the Application](#running-the-application)
+- [Usage](#usage)
+- [Important: Real-Time Updates](#-important-real-time-updates)
+- [DataStore Configuration](#datastore-configuration)
+- [API Endpoints](#api-endpoints)
+- [Project Structure](#project-structure)
+- [Troubleshooting](#troubleshooting)
+- [Security Notes](#security-notes)
+- [License](#license)
+- [Deployment](#deployment)
+- [Support](#support)
+
 ## Features
 
 - ✅ **Create/Update** player data
@@ -67,7 +88,7 @@ touch .env
 
 Add the following to `server/.env`:
 
-```
+```env
 ROBLOX_API_KEY=your_roblox_api_key_here
 UNIVERSE_ID=your_universe_id_here
 PORT=5000
@@ -92,7 +113,7 @@ touch .env
 
 Add:
 
-```
+```env
 REACT_APP_API_URL=http://localhost:5000
 ```
 
@@ -133,15 +154,15 @@ npm start
 1. Open your browser and navigate to `http://localhost:3000`
 2. **Login** with your admin credentials (set in `.env` file)
 3. Enter a Roblox Username in the input field
-3. Use the buttons to perform operations:
+4. Use the buttons to perform operations:
    - **Read**: Fetch existing player data
    - **Create/Update**: Create new data or update existing data
    - **Update**: Update existing player data
    - **Delete**: Remove player data
-4. Use the JSON editor to modify player data
-5. Click "List Players" to see all players in the DataStore
+5. Use the JSON editor to modify player data
+6. Click "List Players" to see all players in the DataStore
 
-## ⚠️ Important: Real-Time Updates
+## ⚠ Important: Real-Time Updates
 
 **DataStore updates are NOT real-time!** If you update a player's data while they're online in the game, they won't see the changes immediately. The player will only see updates when:
 - They leave and rejoin the experience, OR
@@ -172,17 +193,30 @@ The backend provides the following REST API endpoints:
 
 ```
 web-datastore/
-├── server/           # Backend Express.js server
-│   ├── index.js     # Main server file
-│   ├── package.json
-│   └── .env         # Environment variables (create this)
-├── client/          # Frontend React application
-│   ├── src/
-│   │   ├── App.js   # Main React component
-│   │   ├── App.css  # Styles
-│   │   └── config.js # API configuration
+├── api/                    # Vercel serverless functions
+│   ├── players/            # API routes for player operations
+│   │   └── [username].js   # Dynamic route handler
+│   ├── health.js           # Health check endpoint
+│   ├── test.js             # API key test endpoint
+│   ├── utils.js            # Shared utilities
 │   └── package.json
-├── package.json     # Root package.json with scripts
+├── server/                 # Backend Express.js server (for local dev)
+│   ├── index.js            # Main server file
+│   ├── auth.js             # Authentication middleware
+│   ├── verify-api-key.js   # API key verification script
+│   ├── package.json
+│   └── .env                # Environment variables (create this)
+├── client/                 # Frontend React application
+│   ├── src/
+│   │   ├── App.js          # Main React component
+│   │   ├── App.css         # Styles
+│   │   ├── Login.js        # Login component
+│   │   └── config.js       # API configuration
+│   ├── public/
+│   └── package.json
+├── roblox-scripts/         # Roblox Lua scripts for data refresh
+├── vercel.json             # Vercel deployment configuration
+├── package.json            # Root package.json with scripts
 └── README.md
 ```
 
@@ -251,6 +285,8 @@ This error means your API key doesn't have the required permissions. Follow thes
 3. This will show you detailed information about your API key configuration and test if it works
 4. Check the response to see what's wrong
 
+**Then, check the following:**
+
 1. **Check API Key Permissions**:
    - Go to [Roblox Creator Dashboard - Credentials](https://create.roblox.com/dashboard/credentials)
    - Find your API key and click "Edit"
@@ -300,11 +336,19 @@ This error means your API key doesn't have the required permissions. Follow thes
 
 MIT
 
+## Deployment
+
+This application can be deployed to Vercel for production use. See [VERCEL_DEPLOYMENT.md](./VERCEL_DEPLOYMENT.md) for detailed deployment instructions.
+
+**Quick Deploy:**
+1. Push your code to GitHub
+2. Import your repository in [Vercel](https://vercel.com)
+3. Add environment variables (`ROBLOX_API_KEY`, `UNIVERSE_ID`)
+4. Deploy!
+
 ## Support
 
 For issues related to:
 - **Roblox API**: Check [Roblox Open Cloud Documentation](https://create.roblox.com/docs/open-cloud)
 - **This Application**: Open an issue on the repository
-
-#   w e b - d a t a s t o r e - r b l x  
- 
+- **Deployment**: See [VERCEL_DEPLOYMENT.md](./VERCEL_DEPLOYMENT.md) and [TROUBLESHOOTING.md](./TROUBLESHOOTING.md)
