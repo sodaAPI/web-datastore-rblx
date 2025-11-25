@@ -111,8 +111,19 @@ if (!ROBLOX_API_KEY || !UNIVERSE_ID) {
   console.warn('⚠️  Warning: ROBLOX_API_KEY or UNIVERSE_ID not set in .env file');
 }
 
+// Cache for username to userId conversions (to avoid redundant API calls)
+const usernameCache = new Map();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes cache TTL
+
+// Rate limiting: track last request time and enforce minimum delay
+let lastRequestTime = 0;
+const MIN_REQUEST_DELAY = 100; // Minimum 100ms between requests (10 requests/second max)
+
+// Helper function to sleep/delay
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 // Helper function to convert username to userId using Roblox API
-const getUserIdFromUsername = async (username) => {
+const getUserIdFromUsername = async (username, retryCount = 0) => {
   // If it's already a numeric string, assume it's a userId
   if (/^\d+$/.test(username)) {
     return username;
@@ -124,9 +135,24 @@ const getUserIdFromUsername = async (username) => {
     throw new Error('Username cannot be empty');
   }
   
+  // Check cache first
+  const cacheKey = cleanUsername.toLowerCase();
+  const cached = usernameCache.get(cacheKey);
+  if (cached && (Date.now() - cached.timestamp) < CACHE_TTL) {
+    return cached.userId;
+  }
+  
+  // Rate limiting: ensure minimum delay between requests
+  const now = Date.now();
+  const timeSinceLastRequest = now - lastRequestTime;
+  if (timeSinceLastRequest < MIN_REQUEST_DELAY) {
+    await sleep(MIN_REQUEST_DELAY - timeSinceLastRequest);
+  }
+  
   try {
     // Use Roblox Users API to get user by username
     // This endpoint requires a POST request with JSON payload
+    lastRequestTime = Date.now();
     const response = await axios.post('https://users.roblox.com/v1/usernames/users', {
       usernames: [cleanUsername],
       excludeBannedUsers: false
@@ -147,17 +173,43 @@ const getUserIdFromUsername = async (username) => {
       });
       
       if (matchedUser && matchedUser.id) {
-        return matchedUser.id.toString();
+        const userId = matchedUser.id.toString();
+        // Cache the result
+        usernameCache.set(cacheKey, { userId, timestamp: Date.now() });
+        return userId;
       }
     }
     
     // If no match found, try alternative response structure
     if (response.data && response.data[0] && response.data[0].id) {
-      return response.data[0].id.toString();
+      const userId = response.data[0].id.toString();
+      // Cache the result
+      usernameCache.set(cacheKey, { userId, timestamp: Date.now() });
+      return userId;
     }
     
     throw new Error(`User "${cleanUsername}" not found`);
   } catch (error) {
+    // Handle 429 (Too Many Requests) with retry logic
+    if (error.response?.status === 429) {
+      const maxRetries = 3;
+      if (retryCount < maxRetries) {
+        // Exponential backoff: wait 2^retryCount seconds (with jitter)
+        const baseDelay = Math.pow(2, retryCount) * 1000;
+        const jitter = Math.random() * 1000; // Add random jitter up to 1 second
+        const delay = baseDelay + jitter;
+        
+        console.warn(`Rate limited (429) for username "${cleanUsername}". Retrying in ${Math.round(delay)}ms (attempt ${retryCount + 1}/${maxRetries})...`);
+        await sleep(delay);
+        
+        // Recursive retry
+        return getUserIdFromUsername(username, retryCount + 1);
+      } else {
+        console.error(`Rate limited (429) for username "${cleanUsername}". Max retries (${maxRetries}) exceeded.`);
+        throw new Error(`Rate limited: Too many requests. Please try again later.`);
+      }
+    }
+    
     // If it's a 404 or "not found" error, return a clear message
     if (error.response?.status === 404 || error.message.includes('not found')) {
       throw new Error(`User "${cleanUsername}" not found`);

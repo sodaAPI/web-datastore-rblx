@@ -35,10 +35,10 @@ module.exports = async (req, res) => {
 
   // Extract username from URL path (Vercel dynamic route)
   // The file is at /api/players/[username].js, so the param is in the URL
-  // Try multiple methods to get the username parameter
+  // In Vercel, dynamic route params are available in req.query
   let username = req.query.username;
   
-  // If not in query, parse from URL path
+  // If not in query, try to parse from URL path (fallback)
   if (!username && req.url) {
     const urlMatch = req.url.match(/\/api\/players\/([^/?]+)/);
     if (urlMatch) {
@@ -46,10 +46,22 @@ module.exports = async (req, res) => {
     }
   }
   
+  // Log for debugging (remove in production if needed)
+  console.log('Request details:', {
+    method: req.method,
+    url: req.url,
+    query: req.query,
+    extractedUsername: username
+  });
+  
   if (!username) {
     return res.status(400).json({
       success: false,
-      error: 'Username parameter is required'
+      error: 'Username parameter is required',
+      debug: {
+        url: req.url,
+        query: req.query
+      }
     });
   }
   
@@ -155,6 +167,15 @@ module.exports = async (req, res) => {
       error: 'Method not allowed'
     });
   } catch (error) {
+    // Log error for debugging
+    console.error('Error in players/[username] endpoint:', {
+      method: req.method,
+      username: username,
+      errorMessage: error.message,
+      errorStatus: error.response?.status,
+      errorData: error.response?.data
+    });
+    
     // Check if error is from username conversion
     if (error.message && (error.message.includes('not found') || error.message.includes('convert username'))) {
       return res.status(404).json({
@@ -168,6 +189,29 @@ module.exports = async (req, res) => {
       return res.status(404).json({
         success: false,
         error: `Player data not found for "${username}". The player may not have any data stored yet.`
+      });
+    }
+    
+    // Handle other Roblox API errors
+    if (error.response) {
+      const status = error.response.status;
+      const errorData = error.response.data;
+      let errorMessage = `Failed to ${method === 'GET' ? 'read' : method === 'DELETE' ? 'delete' : 'update'} player data`;
+      
+      if (errorData) {
+        if (errorData.errors && Array.isArray(errorData.errors) && errorData.errors.length > 0) {
+          errorMessage = errorData.errors[0].message || errorMessage;
+        } else if (errorData.message) {
+          errorMessage = errorData.message;
+        } else if (errorData.error) {
+          errorMessage = errorData.error;
+        }
+      }
+      
+      return res.status(status).json({
+        success: false,
+        error: errorMessage,
+        status: status
       });
     }
     

@@ -202,7 +202,34 @@ function App() {
       setSuccess('Player data retrieved successfully!');
     } catch (err) {
       console.error('Read error:', err);
-      const errorMessage = err.response?.data?.error || err.message || 'Failed to read player data';
+      console.error('Error response:', err.response);
+      
+      // Extract error message with more details for debugging
+      let errorMessage = 'Failed to read player data';
+      
+      if (err.response) {
+        // Server responded with an error
+        errorMessage = err.response.data?.error || 
+                      err.response.data?.message || 
+                      `Server error (${err.response.status})`;
+        
+        // Add debug info in development
+        if (process.env.NODE_ENV !== 'production') {
+          console.error('Full error response:', {
+            status: err.response.status,
+            statusText: err.response.statusText,
+            data: err.response.data
+          });
+        }
+      } else if (err.request) {
+        // Request was made but no response received
+        errorMessage = 'No response from server. Please check your connection.';
+        console.error('No response received:', err.request);
+      } else {
+        // Error setting up the request
+        errorMessage = err.message || 'Failed to read player data';
+      }
+      
       setError(errorMessage);
       setPlayerData(null);
       setDataJson('');
