@@ -133,28 +133,40 @@ module.exports = async (req, res) => {
         
         let data = response.data;
         
-        // Handle empty string response (Roblox returns empty string when entry doesn't exist)
-        // Also handle cases where response.data might be undefined or null
-        if (data === undefined || data === null || data === '' || (typeof data === 'string' && data.trim() === '')) {
-          console.log('Empty data response from Roblox API');
+        // Log the raw response for debugging
+        console.log('Raw response data type:', typeof data);
+        console.log('Raw response data value:', data === null ? 'null' : data === undefined ? 'undefined' : data === '' ? 'empty string' : String(data).substring(0, 200));
+        
+        // Try to parse as JSON first (matching localhost behavior)
+        let parsedData = data;
+        try {
+          if (typeof data === 'string' && data.trim()) {
+            parsedData = JSON.parse(data);
+            console.log('Successfully parsed as JSON');
+          } else if (typeof data === 'string' && data.trim() === '') {
+            // Empty string - this means no data exists
+            console.log('Empty string response - no data exists');
+            return res.status(404).json({
+              success: false,
+              error: `Player data not found for "${username}". The player may not have any data stored yet.`
+            });
+          }
+        } catch (parseError) {
+          // leave as raw text if not JSON (matching localhost behavior)
+          console.log('Data is not JSON, keeping as text. Parse error:', parseError.message);
+        }
+        
+        // Handle undefined/null (but allow empty objects as valid data)
+        if (parsedData === undefined || parsedData === null) {
+          console.log('Parsed data is undefined/null - no data exists');
           return res.status(404).json({
             success: false,
             error: `Player data not found for "${username}". The player may not have any data stored yet.`
           });
         }
         
-        // Try to parse as JSON, but keep as string if it fails
-        let parsedData = data;
-        try {
-          if (typeof data === 'string' && data.trim()) {
-            parsedData = JSON.parse(data);
-          }
-        } catch (parseError) {
-          // leave as raw text if not JSON
-          console.log('Data is not JSON, keeping as text:', data.substring(0, 100));
-        }
-        
-        // Return the data as-is (even if it's an empty object, that's valid data)
+        // Return the data as-is (matching localhost behavior - even empty objects are valid)
+        console.log('Returning data successfully');
         return res.status(200).json({
           success: true,
           data: parsedData,

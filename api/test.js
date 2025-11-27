@@ -30,6 +30,8 @@ module.exports = async (req, res) => {
     console.log('DataStore Name:', DATASTORE_NAME);
     console.log('API Key Present:', ROBLOX_API_KEY ? 'YES' : 'NO');
     console.log('API Key Length:', ROBLOX_API_KEY ? ROBLOX_API_KEY.length : 0);
+    console.log('Environment:', process.env.NODE_ENV || 'not set');
+    console.log('Vercel:', process.env.VERCEL ? 'YES' : 'NO');
     
     const response = await axios.get(testUrl, config);
     
@@ -48,7 +50,9 @@ module.exports = async (req, res) => {
         universeId: UNIVERSE_ID,
         datastoreName: DATASTORE_NAME,
         apiKeyConfigured: !!ROBLOX_API_KEY,
-        apiKeyLength: ROBLOX_API_KEY ? ROBLOX_API_KEY.length : 0
+        apiKeyLength: ROBLOX_API_KEY ? ROBLOX_API_KEY.length : 0,
+        environment: process.env.NODE_ENV || 'not set',
+        isVercel: !!process.env.VERCEL
       },
       message: response.status >= 200 && response.status < 300 
         ? 'API key test successful!' 
@@ -75,7 +79,9 @@ module.exports = async (req, res) => {
         universeId: UNIVERSE_ID,
         datastoreName: DATASTORE_NAME,
         apiKeyConfigured: !!ROBLOX_API_KEY,
-        apiKeyLength: ROBLOX_API_KEY ? ROBLOX_API_KEY.length : 0
+        apiKeyLength: ROBLOX_API_KEY ? ROBLOX_API_KEY.length : 0,
+        environment: process.env.NODE_ENV || 'not set',
+        isVercel: !!process.env.VERCEL
       }
     });
   }

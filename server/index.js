@@ -32,7 +32,8 @@ const { authenticate, handleLogin, handleLogout, checkAuth } = require('./auth')
 // Roblox API configuration
 const ROBLOX_API_KEY = process.env.ROBLOX_API_KEY?.trim(); // Trim whitespace
 const UNIVERSE_ID = process.env.UNIVERSE_ID?.trim(); // Trim whitespace
-const DATASTORE_NAME = 'PlayerData';
+const DATASTORE_NAME = process.env.DATASTORE_NAME?.trim() || 'PlayerData'; // Configurable via environment variable
+const SCOPE = process.env.DATASTORE_SCOPE?.trim() || 'global'; // Configurable via environment variable
 
 // ------------ Roblox Open Cloud DataStore API (v1 - documented/stable) ------------
 // Format: https://apis.roblox.com/datastores/v1/universes/{universeId}/standard-datastores

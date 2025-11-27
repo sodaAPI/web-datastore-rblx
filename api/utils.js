@@ -3,8 +3,8 @@ const axios = require('axios');
 // Roblox API configuration
 const ROBLOX_API_KEY = process.env.ROBLOX_API_KEY?.trim();
 const UNIVERSE_ID = process.env.UNIVERSE_ID?.trim();
-const DATASTORE_NAME = 'PlayerData';
-const SCOPE = 'global';
+const DATASTORE_NAME = process.env.DATASTORE_NAME?.trim() || 'PlayerData'; // Configurable via environment variable
+const SCOPE = process.env.DATASTORE_SCOPE?.trim() || 'global'; // Configurable via environment variable
 
 // Roblox Open Cloud DataStore API (v1)
 const DATASTORE_V1_BASE = `https://apis.roblox.com/datastores/v1/universes/${UNIVERSE_ID}/standard-datastores`;
