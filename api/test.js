@@ -26,12 +26,18 @@ module.exports = async (req, res) => {
     console.log('\n=== API Key Test ===');
     console.log('Test URL:', testUrl);
     console.log('Method: GET');
-    console.log('Universe ID:', UNIVERSE_ID);
-    console.log('DataStore Name:', DATASTORE_NAME);
+    console.log('Universe ID (raw):', JSON.stringify(process.env.UNIVERSE_ID));
+    console.log('Universe ID (trimmed):', JSON.stringify(UNIVERSE_ID));
+    console.log('Universe ID length:', UNIVERSE_ID?.length || 0);
+    console.log('DataStore Name (raw):', JSON.stringify(process.env.DATASTORE_NAME));
+    console.log('DataStore Name (used):', JSON.stringify(DATASTORE_NAME));
+    console.log('DataStore Name length:', DATASTORE_NAME?.length || 0);
     console.log('API Key Present:', ROBLOX_API_KEY ? 'YES' : 'NO');
     console.log('API Key Length:', ROBLOX_API_KEY ? ROBLOX_API_KEY.length : 0);
     console.log('Environment:', process.env.NODE_ENV || 'not set');
     console.log('Vercel:', process.env.VERCEL ? 'YES' : 'NO');
+    console.log('All env vars with DATASTORE:', Object.keys(process.env).filter(k => k.includes('DATASTORE')));
+    console.log('All env vars with UNIVERSE:', Object.keys(process.env).filter(k => k.includes('UNIVERSE')));
     
     const response = await axios.get(testUrl, config);
     
@@ -48,11 +54,16 @@ module.exports = async (req, res) => {
       config: {
         url: testUrl,
         universeId: UNIVERSE_ID,
+        universeIdRaw: process.env.UNIVERSE_ID,
+        universeIdLength: UNIVERSE_ID?.length || 0,
         datastoreName: DATASTORE_NAME,
+        datastoreNameRaw: process.env.DATASTORE_NAME,
+        datastoreNameLength: DATASTORE_NAME?.length || 0,
         apiKeyConfigured: !!ROBLOX_API_KEY,
         apiKeyLength: ROBLOX_API_KEY ? ROBLOX_API_KEY.length : 0,
         environment: process.env.NODE_ENV || 'not set',
-        isVercel: !!process.env.VERCEL
+        isVercel: !!process.env.VERCEL,
+        hasDataStoreNameEnv: !!process.env.DATASTORE_NAME
       },
       message: response.status >= 200 && response.status < 300 
         ? 'API key test successful!' 

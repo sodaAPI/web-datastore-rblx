@@ -33,10 +33,23 @@ const getHeaders = () => {
     throw new Error('ROBLOX_API_KEY environment variable is not set');
   }
   
-  if (!UNIVERSE_ID?.trim()) {
+  const universeId = UNIVERSE_ID?.trim();
+  if (!universeId) {
     console.error('❌ ERROR: UNIVERSE_ID is empty or not set');
     throw new Error('UNIVERSE_ID environment variable is not set');
   }
+  
+  // Log for debugging (especially useful on Vercel)
+  console.log('API Configuration:', {
+    hasApiKey: !!apiKey,
+    apiKeyLength: apiKey.length,
+    universeId: universeId,
+    universeIdLength: universeId.length,
+    universeIdRaw: JSON.stringify(process.env.UNIVERSE_ID),
+    datastoreName: DATASTORE_NAME,
+    datastoreNameRaw: JSON.stringify(process.env.DATASTORE_NAME),
+    isVercel: !!process.env.VERCEL
+  });
   
   return {
     'x-api-key': apiKey,

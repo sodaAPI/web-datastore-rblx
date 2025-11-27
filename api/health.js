@@ -16,9 +16,16 @@ module.exports = async (req, res) => {
     message: 'Server is running',
     config: {
       universeId: UNIVERSE_ID,
+      universeIdRaw: process.env.UNIVERSE_ID,
+      universeIdLength: UNIVERSE_ID?.length || 0,
       datastoreName: DATASTORE_NAME,
+      datastoreNameRaw: process.env.DATASTORE_NAME,
+      datastoreNameLength: DATASTORE_NAME?.length || 0,
       apiKeyConfigured: !!ROBLOX_API_KEY,
       apiKeyLength: ROBLOX_API_KEY ? ROBLOX_API_KEY.length : 0,
+      isVercel: !!process.env.VERCEL,
+      hasDataStoreNameEnv: !!process.env.DATASTORE_NAME,
+      hasUniverseIdEnv: !!process.env.UNIVERSE_ID,
     }
   });
 };
