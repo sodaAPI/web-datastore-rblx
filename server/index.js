@@ -323,7 +323,6 @@ const getUsernamesFromUserIds = async (userIds) => {
 // Note: Based on actual data, keys use "Player_" (capital P) and are in "global" scope
 // The userId parameter should be the numeric userId string
 const getPlayerKey = (userId) => `Player_${userId}`;
-const SCOPE = 'global'; // Default scope for entries
 
 // ============ Authentication Routes (Public) ============
 // Login endpoint
