@@ -15,17 +15,10 @@ module.exports = async (req, res) => {
   });
 
   try {
-    // Test with a simple list operation to verify API key works
-    const testUrl = `${getV1ListUrl()}?limit=1`;
-    
-    const config = {
-      headers: getHeaders(),
-      validateStatus: () => true // Don't throw on any status
-    };
+    // First, test if we can access the universe at all (test without datastore name)
+    const universeTestUrl = `https://apis.roblox.com/datastores/v1/universes/${UNIVERSE_ID}/standard-datastores`;
     
     console.log('\n=== API Key Test ===');
-    console.log('Test URL:', testUrl);
-    console.log('Method: GET');
     console.log('Universe ID (raw):', JSON.stringify(process.env.UNIVERSE_ID));
     console.log('Universe ID (trimmed):', JSON.stringify(UNIVERSE_ID));
     console.log('Universe ID length:', UNIVERSE_ID?.length || 0);
@@ -34,10 +27,20 @@ module.exports = async (req, res) => {
     console.log('DataStore Name length:', DATASTORE_NAME?.length || 0);
     console.log('API Key Present:', ROBLOX_API_KEY ? 'YES' : 'NO');
     console.log('API Key Length:', ROBLOX_API_KEY ? ROBLOX_API_KEY.length : 0);
+    console.log('API Key First 10 chars:', ROBLOX_API_KEY ? ROBLOX_API_KEY.substring(0, 10) : 'N/A');
     console.log('Environment:', process.env.NODE_ENV || 'not set');
     console.log('Vercel:', process.env.VERCEL ? 'YES' : 'NO');
-    console.log('All env vars with DATASTORE:', Object.keys(process.env).filter(k => k.includes('DATASTORE')));
-    console.log('All env vars with UNIVERSE:', Object.keys(process.env).filter(k => k.includes('UNIVERSE')));
+    
+    // Test with a simple list operation to verify API key works
+    const testUrl = `${getV1ListUrl()}?limit=1`;
+    
+    const config = {
+      headers: getHeaders(),
+      validateStatus: () => true // Don't throw on any status
+    };
+    
+    console.log('Test URL:', testUrl);
+    console.log('Method: GET');
     
     const response = await axios.get(testUrl, config);
     
