@@ -30,6 +30,12 @@ const getHeaders = () => {
   
   if (!apiKey) {
     console.error('❌ ERROR: API key is empty or not set');
+    throw new Error('ROBLOX_API_KEY environment variable is not set');
+  }
+  
+  if (!UNIVERSE_ID?.trim()) {
+    console.error('❌ ERROR: UNIVERSE_ID is empty or not set');
+    throw new Error('UNIVERSE_ID environment variable is not set');
   }
   
   return {

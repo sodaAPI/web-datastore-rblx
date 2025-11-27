@@ -38,7 +38,7 @@ module.exports = async (req, res) => {
   // In Vercel, dynamic route params are available in req.query
   let username = req.query.username;
   
-  // If not in query, try to parse from URL path (fallback)
+  // Also check if it's in the path directly (some Vercel setups)
   if (!username && req.url) {
     const urlMatch = req.url.match(/\/api\/players\/([^/?]+)/);
     if (urlMatch) {
@@ -46,12 +46,14 @@ module.exports = async (req, res) => {
     }
   }
   
-  // Log for debugging (remove in production if needed)
+  // Log for debugging
   console.log('Request details:', {
     method: req.method,
     url: req.url,
     query: req.query,
-    extractedUsername: username
+    extractedUsername: username,
+    hasApiKey: !!process.env.ROBLOX_API_KEY,
+    hasUniverseId: !!process.env.UNIVERSE_ID
   });
   
   if (!username) {
@@ -75,11 +77,40 @@ module.exports = async (req, res) => {
     if (method === 'GET') {
       // GET - Read player data
       try {
-        const response = await axios.get(getV1EntryUrl(), {
-          headers: getHeaders(),
-          params: buildEntryParams(key),
+        // Validate environment variables before making the API call
+        if (!process.env.ROBLOX_API_KEY || !process.env.UNIVERSE_ID) {
+          console.error('Missing environment variables:', {
+            hasApiKey: !!process.env.ROBLOX_API_KEY,
+            hasUniverseId: !!process.env.UNIVERSE_ID
+          });
+          return res.status(500).json({
+            success: false,
+            error: 'Server configuration error: Missing ROBLOX_API_KEY or UNIVERSE_ID environment variables'
+          });
+        }
+
+        const entryUrl = getV1EntryUrl();
+        const params = buildEntryParams(key);
+        const headers = getHeaders();
+        
+        console.log('Making Roblox API request:', {
+          url: entryUrl,
+          params: { ...params, entryKey: params.entryKey.substring(0, 20) + '...' }, // Log partial key for security
+          hasApiKey: !!headers['x-api-key']
+        });
+        
+        const response = await axios.get(entryUrl, {
+          headers: headers,
+          params: params,
           responseType: 'text',
           validateStatus: (status) => status < 500, // Don't throw on 4xx, we'll handle it
+        });
+        
+        console.log('Roblox API response:', {
+          status: response.status,
+          statusText: response.statusText,
+          dataLength: response.data?.length || 0,
+          dataPreview: typeof response.data === 'string' ? response.data.substring(0, 100) : response.data
         });
         
         // Check if Roblox API returned an error status
@@ -90,11 +121,22 @@ module.exports = async (req, res) => {
           });
         }
         
+        // Check for other error statuses
+        if (response.status >= 400 && response.status < 500) {
+          console.error('Roblox API returned error status:', response.status, response.data);
+          return res.status(response.status).json({
+            success: false,
+            error: `Roblox API error: ${response.statusText || 'Bad Request'}`,
+            details: typeof response.data === 'string' ? response.data : 'Unknown error'
+          });
+        }
+        
         let data = response.data;
         
         // Handle empty string response (Roblox returns empty string when entry doesn't exist)
         // Also handle cases where response.data might be undefined or null
         if (data === undefined || data === null || data === '' || (typeof data === 'string' && data.trim() === '')) {
+          console.log('Empty data response from Roblox API');
           return res.status(404).json({
             success: false,
             error: `Player data not found for "${username}". The player may not have any data stored yet.`
@@ -109,7 +151,7 @@ module.exports = async (req, res) => {
           }
         } catch (parseError) {
           // leave as raw text if not JSON
-          console.log('Data is not JSON, keeping as text:', data);
+          console.log('Data is not JSON, keeping as text:', data.substring(0, 100));
         }
         
         // Return the data as-is (even if it's an empty object, that's valid data)
@@ -125,6 +167,20 @@ module.exports = async (req, res) => {
             error: 'Player data not found'
           });
         }
+        
+        // Log the full error for debugging
+        console.error('Error in GET request:', {
+          message: error.message,
+          status: error.response?.status,
+          statusText: error.response?.statusText,
+          data: error.response?.data,
+          config: {
+            url: error.config?.url,
+            method: error.config?.method,
+            params: error.config?.params
+          }
+        });
+        
         throw error; // Re-throw to be handled by outer catch
       }
     }
