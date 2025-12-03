@@ -324,6 +324,16 @@ const getUsernamesFromUserIds = async (userIds) => {
 // The userId parameter should be the numeric userId string
 const getPlayerKey = (userId) => `Player_${userId}`;
 
+// Helper function to get nametag prefix key
+const getNametagPrefixKey = (userId) => `uid_${userId}`;
+
+// Helper function to build entry params for nametag prefix datastore
+const buildNametagPrefixEntryParams = (key) => ({
+  datastoreName: 'NameTagPrefix_Custom_v1',
+  scope: SCOPE,
+  entryKey: key,
+});
+
 // ============ Authentication Routes (Public) ============
 // Login endpoint
 app.post('/api/auth/login', handleLogin);
@@ -665,6 +675,292 @@ app.get('/api/players', authenticate, async (req, res) => {
       console.error('Request Headers:', JSON.stringify({ ...error.config?.headers, 'x-api-key': '***HIDDEN***' }, null, 2));
     } else {
       console.error('Request Error:', error.message);
+    }
+    
+    res.status(error.response?.status || 500).json({
+      success: false,
+      error: errorMessage,
+      status: error.response?.status,
+      details: error.response?.data
+    });
+  }
+});
+
+// ============ Nametag Prefix Routes ============
+// GET - Read nametag prefix data
+app.get('/api/nametag/:username', authenticate, async (req, res) => {
+  try {
+    const { username } = req.params;
+    const usernameParam = username;
+    // Convert username to userId
+    const userId = await getUserIdFromUsername(username);
+    const key = getNametagPrefixKey(userId);
+    
+    const response = await axios.get(getV1EntryUrl(), {
+      headers: getHeaders(),
+      params: buildNametagPrefixEntryParams(key),
+      responseType: 'text',
+      validateStatus: (status) => status < 500,
+    });
+    
+    if (response.status === 404) {
+      return res.status(404).json({
+        success: false,
+        error: `Nametag prefix data not found for "${usernameParam}". The player may not have any nametag prefix stored yet.`
+      });
+    }
+    
+    if (response.status >= 400 && response.status < 500) {
+      return res.status(response.status).json({
+        success: false,
+        error: `Roblox API error: ${response.statusText || 'Bad Request'}`,
+        details: typeof response.data === 'string' ? response.data : 'Unknown error'
+      });
+    }
+    
+    let data = response.data;
+    try {
+      if (typeof data === 'string' && data.trim()) {
+        data = JSON.parse(data);
+      } else if (typeof data === 'string' && data.trim() === '') {
+        return res.status(404).json({
+          success: false,
+          error: `Nametag prefix data not found for "${usernameParam}". The player may not have any nametag prefix stored yet.`
+        });
+      }
+    } catch (parseError) {
+      // leave as raw text if not JSON
+    }
+    
+    if (data === undefined || data === null) {
+      return res.status(404).json({
+        success: false,
+        error: `Nametag prefix data not found for "${usernameParam}". The player may not have any nametag prefix stored yet.`
+      });
+    }
+    
+    res.json({
+      success: true,
+      data,
+    });
+  } catch (error) {
+    // Check if error is from username conversion
+    if (error.message && (error.message.includes('not found') || error.message.includes('convert username'))) {
+      return res.status(404).json({
+        success: false,
+        error: error.message
+      });
+    }
+    
+    if (error.response?.status === 404) {
+      return res.status(404).json({
+        success: false,
+        error: `Nametag prefix data not found for "${req.params.username}". The player may not have any nametag prefix stored yet.`
+      });
+    }
+    
+    // Extract error message from various possible response formats
+    let errorMessage = 'Failed to read nametag prefix data';
+    if (error.response?.data) {
+      errorMessage = error.response.data.message || 
+                    error.response.data.error || 
+                    error.response.data.errorMessage ||
+                    JSON.stringify(error.response.data);
+    }
+    
+    res.status(error.response?.status || 500).json({
+      success: false,
+      error: errorMessage,
+      status: error.response?.status,
+      details: error.response?.data
+    });
+  }
+});
+
+// POST - Create/Update nametag prefix data
+app.post('/api/nametag/:username', authenticate, async (req, res) => {
+  try {
+    const { username } = req.params;
+    const { data } = req.body;
+    // Convert username to userId
+    const userId = await getUserIdFromUsername(username);
+    const key = getNametagPrefixKey(userId);
+    
+    if (!data) {
+      return res.status(400).json({
+        success: false,
+        error: 'Data is required'
+      });
+    }
+
+    // Validate data format
+    if (!data.color || !data.text) {
+      return res.status(400).json({
+        success: false,
+        error: 'Data must contain "color" (with r, g, b) and "text" fields'
+      });
+    }
+
+    if (data.color.r === undefined || data.color.g === undefined || data.color.b === undefined) {
+      return res.status(400).json({
+        success: false,
+        error: 'Color must contain r, g, and b values'
+      });
+    }
+    
+    const params = buildNametagPrefixEntryParams(key);
+    const response = await axios.post(getV1EntryUrl(), data, {
+      headers: getHeaders(),
+      params: params,
+    });
+    
+    res.json({
+      success: true,
+      data: response.data || {},
+      message: 'Nametag prefix data saved successfully'
+    });
+  } catch (error) {
+    // Check if error is from username conversion
+    if (error.message && (error.message.includes('not found') || error.message.includes('convert username'))) {
+      return res.status(404).json({
+        success: false,
+        error: error.message
+      });
+    }
+    
+    // Extract error message from various possible response formats
+    let errorMessage = 'Failed to create/update nametag prefix data';
+    if (error.response?.data) {
+      errorMessage = error.response.data.message || 
+                    error.response.data.error || 
+                    error.response.data.errorMessage ||
+                    JSON.stringify(error.response.data);
+    }
+    
+    res.status(error.response?.status || 500).json({
+      success: false,
+      error: errorMessage,
+      status: error.response?.status,
+      details: error.response?.data
+    });
+  }
+});
+
+// PUT - Update nametag prefix data
+app.put('/api/nametag/:username', authenticate, async (req, res) => {
+  try {
+    const { username } = req.params;
+    const { data } = req.body;
+    // Convert username to userId
+    const userId = await getUserIdFromUsername(username);
+    const key = getNametagPrefixKey(userId);
+    
+    if (!data) {
+      return res.status(400).json({
+        success: false,
+        error: 'Data is required'
+      });
+    }
+
+    // Validate data format
+    if (!data.color || !data.text) {
+      return res.status(400).json({
+        success: false,
+        error: 'Data must contain "color" (with r, g, b) and "text" fields'
+      });
+    }
+
+    if (data.color.r === undefined || data.color.g === undefined || data.color.b === undefined) {
+      return res.status(400).json({
+        success: false,
+        error: 'Color must contain r, g, and b values'
+      });
+    }
+    
+    const params = buildNametagPrefixEntryParams(key);
+    const response = await axios.post(getV1EntryUrl(), data, {
+      headers: getHeaders(),
+      params: params,
+    });
+    
+    res.json({
+      success: true,
+      data: response.data || {},
+      message: 'Nametag prefix data updated successfully'
+    });
+  } catch (error) {
+    // Check if error is from username conversion
+    if (error.message && (error.message.includes('not found') || error.message.includes('convert username'))) {
+      return res.status(404).json({
+        success: false,
+        error: error.message
+      });
+    }
+    
+    // Extract error message from various possible response formats
+    let errorMessage = 'Failed to update nametag prefix data';
+    if (error.response?.data) {
+      const errors = error.response.data.errors || [];
+      if (errors.length > 0 && errors[0].message) {
+        errorMessage = errors[0].message;
+      } else {
+        errorMessage = error.response.data.message || 
+                      error.response.data.error || 
+                      error.response.data.errorMessage ||
+                      JSON.stringify(error.response.data);
+      }
+    }
+    
+    res.status(error.response?.status || 500).json({
+      success: false,
+      error: errorMessage,
+      status: error.response?.status,
+      details: error.response?.data
+    });
+  }
+});
+
+// DELETE - Delete nametag prefix data
+app.delete('/api/nametag/:username', authenticate, async (req, res) => {
+  try {
+    const { username } = req.params;
+    // Convert username to userId
+    const userId = await getUserIdFromUsername(username);
+    const key = getNametagPrefixKey(userId);
+    
+    const params = buildNametagPrefixEntryParams(key);
+    await axios.delete(getV1EntryUrl(), {
+      headers: getHeaders(),
+      params: params,
+    });
+    
+    res.json({
+      success: true,
+      message: 'Nametag prefix data deleted successfully'
+    });
+  } catch (error) {
+    // Check if error is from username conversion
+    if (error.message && (error.message.includes('not found') || error.message.includes('convert username'))) {
+      return res.status(404).json({
+        success: false,
+        error: error.message
+      });
+    }
+    
+    if (error.response?.status === 404) {
+      return res.status(404).json({
+        success: false,
+        error: 'Nametag prefix data not found'
+      });
+    }
+    
+    // Extract error message from various possible response formats
+    let errorMessage = 'Failed to delete nametag prefix data';
+    if (error.response?.data) {
+      errorMessage = error.response.data.message || 
+                    error.response.data.error || 
+                    error.response.data.errorMessage ||
+                    JSON.stringify(error.response.data);
     }
     
     res.status(error.response?.status || 500).json({

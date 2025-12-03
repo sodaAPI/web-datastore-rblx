@@ -4,6 +4,54 @@ import './App.css';
 import { API_BASE_URL } from './config';
 import Login from './Login';
 
+// Modern SVG Icons
+const IconRead = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+    <circle cx="12" cy="12" r="3"></circle>
+  </svg>
+);
+
+const IconAdd = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="12" y1="5" x2="12" y2="19"></line>
+    <line x1="5" y1="12" x2="19" y2="12"></line>
+  </svg>
+);
+
+const IconEdit = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+  </svg>
+);
+
+const IconTrash = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="3 6 5 6 21 6"></polyline>
+    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+  </svg>
+);
+
+const IconList = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="8" y1="6" x2="21" y2="6"></line>
+    <line x1="8" y1="12" x2="21" y2="12"></line>
+    <line x1="8" y1="18" x2="21" y2="18"></line>
+    <line x1="3" y1="6" x2="3.01" y2="6"></line>
+    <line x1="3" y1="12" x2="3.01" y2="12"></line>
+    <line x1="3" y1="18" x2="3.01" y2="18"></line>
+  </svg>
+);
+
+const IconInfo = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10"></circle>
+    <line x1="12" y1="16" x2="12" y2="12"></line>
+    <line x1="12" y1="8" x2="12.01" y2="8"></line>
+  </svg>
+);
+
 // Configure axios to send auth token with all requests (for Vercel)
 // Also enable credentials for session-based auth (local dev)
 const getAuthToken = () => localStorage.getItem('authToken');
@@ -37,6 +85,13 @@ function App() {
   const [playersList, setPlayersList] = useState([]);
   const [listCursor, setListCursor] = useState(null);
   const [showList, setShowList] = useState(false);
+  
+  // Nametag prefix state
+  const [nametagUsername, setNametagUsername] = useState('');
+  const [nametagData, setNametagData] = useState(null);
+  const [nametagColor, setNametagColor] = useState({ r: 255, g: 0, b: 0 });
+  const [nametagText, setNametagText] = useState('');
+  const [nametagLoading, setNametagLoading] = useState(false);
 
   // Check authentication status on mount
   useEffect(() => {
@@ -360,12 +415,190 @@ function App() {
     handleRead();
   };
 
+  // Nametag prefix handlers
+  const handleReadNametag = async () => {
+    if (!nametagUsername.trim()) {
+      setError('Please enter a Username');
+      return;
+    }
+
+    setNametagLoading(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      const response = await axios.get(`${API_BASE_URL}/api/nametag/${nametagUsername}`, {
+        headers: {
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        },
+        validateStatus: (status) => status >= 200 && status < 400
+      });
+      
+      if (response.status === 304) {
+        setError('Data not modified (cached). Please try again.');
+        setNametagLoading(false);
+        return;
+      }
+      
+      if (response.data && response.data.success === false) {
+        setError(response.data.error || 'Nametag prefix data not found');
+        setNametagData(null);
+        setNametagColor({ r: 255, g: 0, b: 0 });
+        setNametagText('');
+        return;
+      }
+      
+      const fullData = response.data?.data;
+      
+      if (!fullData || fullData === null || fullData === '') {
+        setError(`Nametag prefix data not found for "${nametagUsername}". Use "Create/Update" to add data.`);
+        setNametagData(null);
+        setNametagColor({ r: 255, g: 0, b: 0 });
+        setNametagText('');
+        return;
+      }
+      
+      setNametagData(fullData);
+      
+      // Extract color and text
+      if (fullData.color) {
+        setNametagColor({
+          r: fullData.color.r || 255,
+          g: fullData.color.g || 0,
+          b: fullData.color.b || 0
+        });
+      }
+      if (fullData.text) {
+        setNametagText(fullData.text);
+      }
+      
+      setSuccess('Nametag prefix data retrieved successfully!');
+    } catch (err) {
+      let errorMessage = 'Failed to read nametag prefix data';
+      
+      if (err.response) {
+        errorMessage = err.response.data?.error || 
+                      err.response.data?.message || 
+                      `Server error (${err.response.status})`;
+      } else if (err.request) {
+        errorMessage = 'No response from server. Please check your connection.';
+      } else {
+        errorMessage = err.message || 'Failed to read nametag prefix data';
+      }
+      
+      setError(errorMessage);
+      setNametagData(null);
+      setNametagColor({ r: 255, g: 0, b: 0 });
+      setNametagText('');
+    } finally {
+      setNametagLoading(false);
+    }
+  };
+
+  const handleCreateNametag = async () => {
+    if (!nametagUsername.trim()) {
+      setError('Please enter a Username');
+      return;
+    }
+
+    if (!nametagText.trim()) {
+      setError('Please enter nametag text');
+      return;
+    }
+
+    const data = {
+      color: {
+        r: parseInt(nametagColor.r) || 255,
+        g: parseInt(nametagColor.g) || 0,
+        b: parseInt(nametagColor.b) || 0
+      },
+      text: nametagText.trim()
+    };
+
+    setNametagLoading(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      await axios.post(`${API_BASE_URL}/api/nametag/${nametagUsername}`, { data });
+      setSuccess('Nametag prefix data created/updated successfully!');
+      handleReadNametag(); // Refresh the data
+    } catch (err) {
+      setError(err.response?.data?.error || err.message || 'Failed to create/update nametag prefix data');
+    } finally {
+      setNametagLoading(false);
+    }
+  };
+
+  const handleUpdateNametag = async () => {
+    if (!nametagUsername.trim()) {
+      setError('Please enter a Username');
+      return;
+    }
+
+    if (!nametagText.trim()) {
+      setError('Please enter nametag text');
+      return;
+    }
+
+    const data = {
+      color: {
+        r: parseInt(nametagColor.r) || 255,
+        g: parseInt(nametagColor.g) || 0,
+        b: parseInt(nametagColor.b) || 0
+      },
+      text: nametagText.trim()
+    };
+
+    setNametagLoading(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      const response = await axios.put(`${API_BASE_URL}/api/nametag/${nametagUsername}`, { data });
+      setSuccess(response.data?.message || 'Nametag prefix data updated successfully!');
+      handleReadNametag(); // Refresh the data
+    } catch (err) {
+      setError(err.response?.data?.error || err.message || 'Failed to update nametag prefix data');
+    } finally {
+      setNametagLoading(false);
+    }
+  };
+
+  const handleDeleteNametag = async () => {
+    if (!nametagUsername.trim()) {
+      setError('Please enter a Username');
+      return;
+    }
+
+    if (!window.confirm(`Are you sure you want to delete nametag prefix data for ${nametagUsername}?`)) {
+      return;
+    }
+
+    setNametagLoading(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      await axios.delete(`${API_BASE_URL}/api/nametag/${nametagUsername}`);
+      setSuccess('Nametag prefix data deleted successfully!');
+      setNametagData(null);
+      setNametagColor({ r: 255, g: 0, b: 0 });
+      setNametagText('');
+    } catch (err) {
+      setError(err.response?.data?.error || err.message || 'Failed to delete nametag prefix data');
+    } finally {
+      setNametagLoading(false);
+    }
+  };
+
   // Show login if not authenticated
   if (checkingAuth) {
     return (
       <div className="App">
         <div className="container">
-          <div style={{ textAlign: 'center', padding: '50px' }}>
+          <div style={{ textAlign: 'center', padding: '50px', color: '#71717a' }}>
             <p>Checking authentication...</p>
           </div>
         </div>
@@ -387,11 +620,11 @@ function App() {
               <p className="subtitle">Manage PlayerData for experience</p>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <span style={{ fontSize: '0.9rem', color: '#666' }}>Logged in as: <strong>{authUsername}</strong></span>
+              <span style={{ fontSize: '0.875rem', color: '#71717a' }}>Logged in as: <strong style={{ color: '#09090b' }}>{authUsername}</strong></span>
               <button 
                 onClick={handleLogout}
                 className="btn btn-secondary"
-                style={{ padding: '8px 16px', fontSize: '0.9rem' }}
+                style={{ padding: '8px 16px', fontSize: '0.875rem' }}
               >
                 Logout
               </button>
@@ -424,28 +657,44 @@ function App() {
                 disabled={loading}
                 className="btn btn-primary"
               >
-                {loading ? 'Loading...' : '📖 Read'}
+                {loading ? 'Loading...' : (
+                  <>
+                    <IconRead /> Read
+                  </>
+                )}
               </button>
               <button 
                 onClick={handleCreate} 
                 disabled={loading}
                 className="btn btn-success"
               >
-                {loading ? 'Saving...' : '➕ Create/Update'}
+                {loading ? 'Saving...' : (
+                  <>
+                    <IconAdd /> Create/Update
+                  </>
+                )}
               </button>
               <button 
                 onClick={handleUpdate} 
                 disabled={loading}
                 className="btn btn-warning"
               >
-                {loading ? 'Updating...' : '✏️ Update'}
+                {loading ? 'Updating...' : (
+                  <>
+                    <IconEdit /> Update
+                  </>
+                )}
               </button>
               <button 
                 onClick={handleDelete} 
                 disabled={loading}
                 className="btn btn-danger"
               >
-                {loading ? 'Deleting...' : '🗑️ Delete'}
+                {loading ? 'Deleting...' : (
+                  <>
+                    <IconTrash /> Delete
+                  </>
+                )}
               </button>
             </div>
           </div>
@@ -460,7 +709,7 @@ function App() {
               rows="15"
             />
             <p className="help-text">
-              💡 Tip: Use "Read" to load existing data, or enter new JSON data to create/update
+              <IconInfo /> Tip: Use "Read" to load existing data, or enter new JSON data to create/update
             </p>
           </div>
 
@@ -471,7 +720,11 @@ function App() {
               disabled={loading}
               className="btn btn-info"
             >
-              {loading ? 'Loading...' : '📋 List Players'}
+              {loading ? 'Loading...' : (
+                <>
+                  <IconList /> List Players
+                </>
+              )}
             </button>
 
             {showList && playersList.length > 0 && (
@@ -497,8 +750,8 @@ function App() {
                     Load More
                   </button>
                 )}
-                <p className="help-text" style={{ marginTop: '10px', fontSize: '0.85rem', color: '#666' }}>
-                  💡 Click on any player to load their data
+                <p className="help-text" style={{ marginTop: '10px', fontSize: '0.8125rem', color: '#71717a' }}>
+                  <IconInfo /> Click on any player to load their data
                 </p>
               </div>
             )}
@@ -514,10 +767,143 @@ function App() {
               <pre className="data-preview">{JSON.stringify(playerData, null, 2)}</pre>
             </div>
           )}
+
+          <div className="card" style={{ marginTop: '30px', borderTop: '1px solid rgba(0, 0, 0, 0.1)' }}>
+            <h2>Nametag Prefix Operations</h2>
+            <div className="form-group">
+              <label htmlFor="nametag-username">Username:</label>
+              <input
+                id="nametag-username"
+                type="text"
+                value={nametagUsername}
+                onChange={(e) => setNametagUsername(e.target.value)}
+                placeholder="Enter username (e.g., builderman)"
+                className="input"
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="nametag-text">Nametag Text:</label>
+              <input
+                id="nametag-text"
+                type="text"
+                value={nametagText}
+                onChange={(e) => setNametagText(e.target.value)}
+                placeholder="Enter nametag text (e.g., Owner)"
+                className="input"
+              />
+            </div>
+
+            <div className="form-group">
+              <label>Color (RGB):</label>
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: '0.8125rem', color: '#71717a' }}>Red (R):</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="255"
+                    value={nametagColor.r}
+                    onChange={(e) => setNametagColor({ ...nametagColor, r: e.target.value })}
+                    className="input"
+                    style={{ width: '100%' }}
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: '0.8125rem', color: '#71717a' }}>Green (G):</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="255"
+                    value={nametagColor.g}
+                    onChange={(e) => setNametagColor({ ...nametagColor, g: e.target.value })}
+                    className="input"
+                    style={{ width: '100%' }}
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: '0.8125rem', color: '#71717a' }}>Blue (B):</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="255"
+                    value={nametagColor.b}
+                    onChange={(e) => setNametagColor({ ...nametagColor, b: e.target.value })}
+                    className="input"
+                    style={{ width: '100%' }}
+                  />
+                </div>
+                <div style={{ 
+                  width: '60px', 
+                  height: '60px', 
+                  backgroundColor: `rgb(${nametagColor.r}, ${nametagColor.g}, ${nametagColor.b})`,
+                  border: '1px solid rgba(0, 0, 0, 0.1)',
+                  borderRadius: '8px',
+                  marginTop: '20px',
+                  boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)'
+                }} title="Color Preview" />
+              </div>
+            </div>
+
+            <div className="button-group">
+              <button 
+                onClick={handleReadNametag} 
+                disabled={nametagLoading || loading}
+                className="btn btn-primary"
+              >
+                {nametagLoading ? 'Loading...' : (
+                  <>
+                    <IconRead /> Read
+                  </>
+                )}
+              </button>
+              <button 
+                onClick={handleCreateNametag} 
+                disabled={nametagLoading || loading}
+                className="btn btn-success"
+              >
+                {nametagLoading ? 'Saving...' : (
+                  <>
+                    <IconAdd /> Create/Update
+                  </>
+                )}
+              </button>
+              <button 
+                onClick={handleUpdateNametag} 
+                disabled={nametagLoading || loading}
+                className="btn btn-warning"
+              >
+                {nametagLoading ? 'Updating...' : (
+                  <>
+                    <IconEdit /> Update
+                  </>
+                )}
+              </button>
+              <button 
+                onClick={handleDeleteNametag} 
+                disabled={nametagLoading || loading}
+                className="btn btn-danger"
+              >
+                {nametagLoading ? 'Deleting...' : (
+                  <>
+                    <IconTrash /> Delete
+                  </>
+                )}
+              </button>
+            </div>
+
+            {nametagData && (
+              <div style={{ marginTop: '20px', padding: '16px', backgroundColor: 'rgba(250, 250, 250, 0.8)', borderRadius: '8px', border: '1px solid rgba(0, 0, 0, 0.06)' }}>
+                <h3 style={{ marginTop: 0, fontSize: '0.9375rem', fontWeight: 600, color: '#09090b', marginBottom: '8px' }}>Current Nametag Prefix Data:</h3>
+                <pre style={{ margin: 0, fontSize: '0.8125rem', color: '#09090b', fontFamily: "'Courier New', monospace" }}>{JSON.stringify(nametagData, null, 2)}</pre>
+              </div>
+            )}
+          </div>
         </div>
 
         <footer className="footer">
           <p>DataStore: <strong>PlayerData</strong> | Key Format: <strong>Player_(userId)</strong> | Username is converted to userId automatically</p>
+          <p style={{ marginTop: '10px' }}>Nametag DataStore: <strong>NameTagPrefix_Custom_v1</strong> | Key Format: <strong>uid_(userId)</strong></p>
         </footer>
       </div>
     </div>

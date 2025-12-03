@@ -47,8 +47,8 @@ function Login({ onLogin }) {
         <div className="login-container">
           <div className="login-card">
             <header className="header">
-              <h1 style={{ color: 'blue' }}>DataStore Manager</h1>
-              <p className="subtitle" style={{ color: 'blue' }}>Please login to continue</p>
+              <h1>DataStore Manager</h1>
+              <p className="subtitle">Please login to continue</p>
             </header>
 
             {error && <div className="alert alert-error">{error}</div>}

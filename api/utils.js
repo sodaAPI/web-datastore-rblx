@@ -270,6 +270,16 @@ const getUsernamesFromUserIds = async (userIds) => {
 // Helper function to get player key
 const getPlayerKey = (userId) => `Player_${userId}`;
 
+// Helper function to get nametag prefix key
+const getNametagPrefixKey = (userId) => `uid_${userId}`;
+
+// Helper function to build entry params for nametag prefix datastore
+const buildNametagPrefixEntryParams = (key) => ({
+  datastoreName: 'NameTagPrefix_Custom_v1',
+  scope: SCOPE,
+  entryKey: key,
+});
+
 // CORS headers helper
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -340,6 +350,8 @@ module.exports = {
   getUsernameFromUserId,
   getUsernamesFromUserIds,
   getPlayerKey,
+  getNametagPrefixKey,
+  buildNametagPrefixEntryParams,
   corsHeaders,
   authenticate,
   verifyToken,
