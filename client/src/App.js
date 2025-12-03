@@ -59,6 +59,26 @@ const IconColorPicker = () => (
   </svg>
 );
 
+const IconSun = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="5"></circle>
+    <line x1="12" y1="1" x2="12" y2="3"></line>
+    <line x1="12" y1="21" x2="12" y2="23"></line>
+    <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+    <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+    <line x1="1" y1="12" x2="3" y2="12"></line>
+    <line x1="21" y1="12" x2="23" y2="12"></line>
+    <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+    <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+  </svg>
+);
+
+const IconMoon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+  </svg>
+);
+
 // Configure axios to send auth token with all requests (for Vercel)
 // Also enable credentials for session-based auth (local dev)
 const getAuthToken = () => localStorage.getItem('authToken');
@@ -92,6 +112,10 @@ function App() {
   const [playersList, setPlayersList] = useState([]);
   const [listCursor, setListCursor] = useState(null);
   const [showList, setShowList] = useState(false);
+  const [darkMode, setDarkMode] = useState(() => {
+    const saved = localStorage.getItem('darkMode');
+    return saved ? JSON.parse(saved) : false;
+  });
   
   // Nametag prefix state
   const [nametagUsername, setNametagUsername] = useState('');
@@ -140,6 +164,21 @@ function App() {
   useEffect(() => {
     checkAuthentication();
   }, []);
+
+  // Apply dark mode class to document
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+    localStorage.setItem('darkMode', JSON.stringify(darkMode));
+  }, [darkMode]);
+
+  // Toggle dark mode
+  const toggleDarkMode = () => {
+    setDarkMode(!darkMode);
+  };
 
   const checkAuthentication = async () => {
     try {
@@ -641,7 +680,7 @@ function App() {
     return (
       <div className="App">
         <div className="container">
-          <div style={{ textAlign: 'center', padding: '50px', color: '#71717a' }}>
+          <div style={{ textAlign: 'center', padding: '50px', color: 'var(--text-secondary)' }}>
             <p>Checking authentication...</p>
           </div>
         </div>
@@ -663,11 +702,19 @@ function App() {
               <p className="subtitle">Manage PlayerData for experience</p>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <span style={{ fontSize: '0.875rem', color: '#71717a' }}>Logged in as: <strong style={{ color: '#09090b' }}>{authUsername}</strong></span>
+              <span style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Logged in as: <strong style={{ color: 'var(--text-primary)' }}>{authUsername}</strong></span>
+              <button 
+                onClick={toggleDarkMode}
+                className="btn btn-secondary"
+                style={{ padding: '8px 12px', fontSize: '0.875rem', minWidth: 'auto', marginTop: 0 }}
+                title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+              >
+                {darkMode ? <IconSun /> : <IconMoon />}
+              </button>
               <button 
                 onClick={handleLogout}
                 className="btn btn-secondary"
-                style={{ padding: '8px 16px', fontSize: '0.875rem' }}
+                style={{ padding: '8px 16px', fontSize: '0.875rem', marginTop: 0 }}
               >
                 Logout
               </button>
@@ -789,11 +836,12 @@ function App() {
                     onClick={() => handleListPlayers(listCursor)} 
                     disabled={loading}
                     className="btn btn-secondary"
+                    style={{ marginTop: 0 }}
                   >
                     Load More
                   </button>
                 )}
-                <p className="help-text" style={{ marginTop: '10px', fontSize: '0.8125rem', color: '#71717a' }}>
+                <p className="help-text" style={{ marginTop: '10px', fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
                   <IconInfo /> Click on any player to load their data
                 </p>
               </div>
@@ -841,7 +889,7 @@ function App() {
               <label>Color (RGB):</label>
               <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                 <div style={{ flex: 1 }}>
-                  <label style={{ fontSize: '0.8125rem', color: '#71717a' }}>Red (R):</label>
+                  <label style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>Red (R):</label>
                   <input
                     type="number"
                     min="0"
@@ -853,7 +901,7 @@ function App() {
                   />
                 </div>
                 <div style={{ flex: 1 }}>
-                  <label style={{ fontSize: '0.8125rem', color: '#71717a' }}>Green (G):</label>
+                  <label style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>Green (G):</label>
                   <input
                     type="number"
                     min="0"
@@ -865,7 +913,7 @@ function App() {
                   />
                 </div>
                 <div style={{ flex: 1 }}>
-                  <label style={{ fontSize: '0.8125rem', color: '#71717a' }}>Blue (B):</label>
+                  <label style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>Blue (B):</label>
                   <input
                     type="number"
                     min="0"
@@ -980,8 +1028,8 @@ function App() {
 
             {nametagData && (
               <div style={{ marginTop: '20px', padding: '16px', backgroundColor: 'rgba(250, 250, 250, 0.8)', borderRadius: '8px', border: '1px solid rgba(0, 0, 0, 0.06)' }}>
-                <h3 style={{ marginTop: 0, fontSize: '0.9375rem', fontWeight: 600, color: '#09090b', marginBottom: '8px' }}>Current Nametag Prefix Data:</h3>
-                <pre style={{ margin: 0, fontSize: '0.8125rem', color: '#09090b', fontFamily: "'Courier New', monospace" }}>{JSON.stringify(nametagData, null, 2)}</pre>
+                <h3 style={{ marginTop: 0, fontSize: '0.9375rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '8px' }}>Current Nametag Prefix Data:</h3>
+                <pre style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--text-primary)', fontFamily: "'Courier New', monospace" }}>{JSON.stringify(nametagData, null, 2)}</pre>
               </div>
             )}
           </div>
