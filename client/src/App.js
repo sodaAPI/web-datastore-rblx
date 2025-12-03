@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import './App.css';
 import { API_BASE_URL } from './config';
@@ -52,6 +52,13 @@ const IconInfo = () => (
   </svg>
 );
 
+const IconColorPicker = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
+    <circle cx="12" cy="12" r="1"></circle>
+  </svg>
+);
+
 // Configure axios to send auth token with all requests (for Vercel)
 // Also enable credentials for session-based auth (local dev)
 const getAuthToken = () => localStorage.getItem('authToken');
@@ -92,6 +99,42 @@ function App() {
   const [nametagColor, setNametagColor] = useState({ r: 255, g: 0, b: 0 });
   const [nametagText, setNametagText] = useState('');
   const [nametagLoading, setNametagLoading] = useState(false);
+  const colorPickerRef = useRef(null);
+
+  // Helper function to convert RGB to hex
+  const rgbToHex = (r, g, b) => {
+    const toHex = (n) => {
+      const hex = parseInt(n).toString(16);
+      return hex.length === 1 ? '0' + hex : hex;
+    };
+    return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+  };
+
+  // Helper function to convert hex to RGB
+  const hexToRgb = (hex) => {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+      r: parseInt(result[1], 16),
+      g: parseInt(result[2], 16),
+      b: parseInt(result[3], 16)
+    } : null;
+  };
+
+  // Handle color picker click
+  const handleColorPreviewClick = () => {
+    if (colorPickerRef.current) {
+      colorPickerRef.current.click();
+    }
+  };
+
+  // Handle color picker change
+  const handleColorPickerChange = (e) => {
+    const hex = e.target.value;
+    const rgb = hexToRgb(hex);
+    if (rgb) {
+      setNametagColor(rgb);
+    }
+  };
 
   // Check authentication status on mount
   useEffect(() => {
@@ -833,15 +876,58 @@ function App() {
                     style={{ width: '100%' }}
                   />
                 </div>
-                <div style={{ 
-                  width: '60px', 
-                  height: '60px', 
-                  backgroundColor: `rgb(${nametagColor.r}, ${nametagColor.g}, ${nametagColor.b})`,
-                  border: '1px solid rgba(0, 0, 0, 0.1)',
-                  borderRadius: '8px',
-                  marginTop: '20px',
-                  boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)'
-                }} title="Color Preview" />
+                <div style={{ position: 'relative' }}>
+                  <input
+                    ref={colorPickerRef}
+                    type="color"
+                    value={rgbToHex(nametagColor.r, nametagColor.g, nametagColor.b)}
+                    onChange={handleColorPickerChange}
+                    style={{
+                      position: 'absolute',
+                      opacity: 0,
+                      width: 0,
+                      height: 0,
+                      pointerEvents: 'none'
+                    }}
+                  />
+                  <div
+                    onClick={handleColorPreviewClick}
+                    style={{ 
+                      width: '60px', 
+                      height: '60px', 
+                      backgroundColor: `rgb(${nametagColor.r}, ${nametagColor.g}, ${nametagColor.b})`,
+                      border: '1px solid rgba(0, 0, 0, 0.1)',
+                      borderRadius: '8px',
+                      marginTop: '20px',
+                      boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s',
+                      position: 'relative'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.1)';
+                      e.currentTarget.style.transform = 'scale(1.05)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.boxShadow = '0 1px 2px rgba(0, 0, 0, 0.05)';
+                      e.currentTarget.style.transform = 'scale(1)';
+                    }}
+                    title="Click to open color picker"
+                  >
+                    <div style={{
+                      position: 'absolute',
+                      top: '50%',
+                      left: '50%',
+                      transform: 'translate(-50%, -50%)',
+                      opacity: 0.4,
+                      pointerEvents: 'none',
+                      color: 'white',
+                      filter: 'drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3))'
+                    }}>
+                      <IconColorPicker />
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 
