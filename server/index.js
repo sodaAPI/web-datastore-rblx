@@ -609,12 +609,14 @@ app.delete('/api/players/:username', authenticate, async (req, res) => {
 // GET - List all players (using ListEntries endpoint)
 app.get('/api/players', authenticate, async (req, res) => {
   try {
-    const { cursor, limit = 50 } = req.query;
+    const { cursor, limit = 100 } = req.query;
+    // Cap limit at 100 for performance with large datasets (1M+ entries)
+    const cappedLimit = Math.min(parseInt(limit) || 100, 100);
     
     const params = {
       datastoreName: DATASTORE_NAME,
       scope: SCOPE,
-      limit,
+      limit: cappedLimit,
       cursor,
     };
     
@@ -677,6 +679,421 @@ app.get('/api/players', authenticate, async (req, res) => {
       console.error('Request Error:', error.message);
     }
     
+    res.status(error.response?.status || 500).json({
+      success: false,
+      error: errorMessage,
+      status: error.response?.status,
+      details: error.response?.data
+    });
+  }
+});
+
+// ============ Leaderboard Route ============
+// Helper function to make rate-limited requests with exponential backoff
+const makeRateLimitedRequest = async (requestFn, retries = 3, baseDelay = 1000) => {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const response = await requestFn();
+      
+      // If we get a 429, wait and retry
+      if (response.status === 429) {
+        if (attempt < retries) {
+          const delay = baseDelay * Math.pow(2, attempt); // Exponential backoff
+          console.log(`Rate limited (429), waiting ${delay}ms before retry ${attempt + 1}/${retries}`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+      }
+      
+      return response;
+    } catch (error) {
+      // Handle 429 errors
+      if (error.response?.status === 429) {
+        if (attempt < retries) {
+          const delay = baseDelay * Math.pow(2, attempt);
+          console.log(`Rate limited (429), waiting ${delay}ms before retry ${attempt + 1}/${retries}`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+      }
+      
+      // For other errors, throw immediately
+      throw error;
+    }
+  }
+  
+  throw new Error('Max retries exceeded');
+};
+
+// Helper to delay between requests
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// In-memory cache for leaderboard
+const leaderboardCache = {
+  data: null,
+  timestamp: null,
+  ttl: 10 * 60 * 1000, // 10 minutes TTL
+};
+
+// Function to check if cache is valid
+const isCacheValid = () => {
+  if (!leaderboardCache.data || !leaderboardCache.timestamp) {
+    return false;
+  }
+  const age = Date.now() - leaderboardCache.timestamp;
+  return age < leaderboardCache.ttl;
+};
+
+// Function to fetch and process leaderboard (the expensive operation)
+const fetchLeaderboardData = async (topLimit, maxSample) => {
+  console.log(`Fetching leaderboard: top ${topLimit}, sampling ${maxSample} players`);
+
+  let allCandidates = [];
+  let cursor = null;
+  let pagesFetched = 0;
+  const maxPages = Math.ceil(maxSample / 100);
+
+  while (pagesFetched < maxPages && allCandidates.length < maxSample) {
+    const params = {
+      datastoreName: DATASTORE_NAME,
+      scope: SCOPE,
+      limit: 100,
+      cursor,
+    };
+
+    const listResponse = await makeRateLimitedRequest(async () => {
+      return await axios.get(getV1ListUrl(), {
+        headers: getHeaders(),
+        params,
+      });
+    });
+
+    let entries = listResponse.data?.entries || [];
+    let userIds = [];
+
+    if (entries.length > 0) {
+      userIds = entries.map((entry) => {
+        const match = entry.entryKey?.match(/Player_(\d+)/);
+        return match ? match[1] : entry.entryKey;
+      });
+    } else if (listResponse.data?.keys && listResponse.data.keys.length > 0) {
+      entries = listResponse.data.keys;
+      userIds = listResponse.data.keys.map((keyObj) => {
+        const key = typeof keyObj === 'string' ? keyObj : keyObj.key || keyObj.entryKey;
+        const match = key?.match(/Player_(\d+)/);
+        return match ? match[1] : key;
+      });
+    }
+
+    if (userIds.length === 0) {
+      break;
+    }
+
+    const batchSize = 5;
+    for (let i = 0; i < userIds.length && allCandidates.length < maxSample; i += batchSize) {
+      const batch = userIds.slice(i, i + batchSize);
+      
+      for (const userId of batch) {
+        try {
+          const key = getPlayerKey(userId);
+          const entryParams = buildEntryParams(key);
+          
+          const playerResponse = await makeRateLimitedRequest(async () => {
+            return await axios.get(getV1EntryUrl(), {
+              headers: getHeaders(),
+              params: entryParams,
+              validateStatus: (status) => status < 500,
+            });
+          });
+
+          if (playerResponse.status === 404) {
+            continue;
+          }
+
+          let data = playerResponse.data;
+          try {
+            if (typeof data === 'string' && data.trim()) {
+              data = JSON.parse(data);
+            }
+          } catch (e) {
+            // Keep as raw data if not JSON
+          }
+
+          const summit = data?.summit || 
+                        data?.summits || 
+                        data?.bestSummit || 
+                        data?.highestSummit || 
+                        data?.Summits ||
+                        data?.Summit ||
+                        0;
+
+          const summitValue = Number(summit) || 0;
+          
+          if (summitValue > 0) {
+            allCandidates.push({
+              userId,
+              summit: summitValue,
+              data
+            });
+          }
+        } catch (error) {
+          if (error.response?.status === 429) {
+            console.error('Rate limit exceeded after retries. Stopping leaderboard fetch.');
+            break;
+          }
+          console.error(`Error fetching data for userId ${userId}:`, error.message);
+        }
+        
+        await delay(200);
+      }
+
+      if (i + batchSize < userIds.length) {
+        await delay(500);
+      }
+    }
+
+    cursor = listResponse.data?.nextPageCursor || null;
+    pagesFetched++;
+
+    if (!cursor) break;
+
+    await delay(1000);
+  }
+
+  const sorted = allCandidates
+    .sort((a, b) => b.summit - a.summit)
+    .slice(0, topLimit);
+
+  const userIdsToConvert = sorted.map(p => p.userId);
+  const usernames = await getUsernamesFromUserIds(userIdsToConvert);
+
+  const leaderboard = sorted.map((player, index) => ({
+    rank: index + 1,
+    username: usernames[index] || player.userId,
+    userId: player.userId,
+    summit: player.summit,
+  }));
+
+  return {
+    leaderboard,
+    sampleSize: allCandidates.length,
+    totalSampled: allCandidates.length,
+    pagesFetched,
+    timestamp: Date.now(),
+  };
+};
+
+// GET - Get top summits leaderboard
+app.get('/api/leaderboard', authenticate, async (req, res) => {
+  try {
+    const { limit = 10, sampleSize = 2000, forceRefresh = false } = req.query;
+    const topLimit = Math.min(parseInt(limit) || 10, 50);
+    const maxSample = Math.min(parseInt(sampleSize) || 2000, 10000);
+    const shouldForceRefresh = forceRefresh === 'true' || forceRefresh === true;
+
+    // Check cache first (unless force refresh is requested)
+    if (!shouldForceRefresh && isCacheValid()) {
+      console.log('Serving leaderboard from cache');
+      const cachedData = leaderboardCache.data;
+      
+      const limitedLeaderboard = cachedData.leaderboard.slice(0, topLimit);
+      
+      return res.json({
+        success: true,
+        data: {
+          leaderboard: limitedLeaderboard,
+          sampleSize: cachedData.sampleSize,
+          totalSampled: cachedData.totalSampled,
+          cached: true,
+          cacheAge: Math.round((Date.now() - cachedData.timestamp) / 1000),
+          note: `Leaderboard from cache (${cachedData.sampleSize} players sampled). Add ?forceRefresh=true to refresh.`
+        }
+      });
+    }
+
+    // Cache miss or force refresh - fetch fresh data
+    console.log(shouldForceRefresh ? 'Force refreshing leaderboard...' : 'Cache expired, fetching fresh leaderboard...');
+    
+    const leaderboardData = await fetchLeaderboardData(topLimit, maxSample);
+
+    // Update cache
+    leaderboardCache.data = leaderboardData;
+    leaderboardCache.timestamp = leaderboardData.timestamp;
+
+    res.json({
+      success: true,
+      data: {
+        leaderboard: leaderboardData.leaderboard,
+        sampleSize: leaderboardData.sampleSize,
+        totalSampled: leaderboardData.totalSampled,
+        cached: false,
+        note: `Leaderboard based on sample of ${leaderboardData.sampleSize} players from ${leaderboardData.pagesFetched} pages. Cached for 10 minutes.`
+      }
+    });
+
+    console.log(`Fetching leaderboard: top ${topLimit}, sampling ${maxSample} players`);
+
+    // Fetch players in batches
+    let allCandidates = [];
+    let cursor = null;
+    let pagesFetched = 0;
+    const maxPages = Math.ceil(maxSample / 100);
+
+    while (pagesFetched < maxPages && allCandidates.length < maxSample) {
+      const params = {
+        datastoreName: DATASTORE_NAME,
+        scope: SCOPE,
+        limit: 100,
+        cursor,
+      };
+
+      // Use rate-limited request for list endpoint
+      const listResponse = await makeRateLimitedRequest(async () => {
+        return await axios.get(getV1ListUrl(), {
+          headers: getHeaders(),
+          params,
+        });
+      });
+
+      // Extract userIds from response
+      let entries = listResponse.data?.entries || [];
+      let userIds = [];
+
+      if (entries.length > 0) {
+        userIds = entries.map((entry) => {
+          const match = entry.entryKey?.match(/Player_(\d+)/);
+          return match ? match[1] : entry.entryKey;
+        });
+      } else if (listResponse.data?.keys && listResponse.data.keys.length > 0) {
+        entries = listResponse.data.keys;
+        userIds = listResponse.data.keys.map((keyObj) => {
+          const key = typeof keyObj === 'string' ? keyObj : keyObj.key || keyObj.entryKey;
+          const match = key?.match(/Player_(\d+)/);
+          return match ? match[1] : key;
+        });
+      }
+
+      if (userIds.length === 0) {
+        break;
+      }
+
+      // Fetch player data sequentially with delays to avoid rate limits
+      // Process smaller batches to respect rate limits
+      const batchSize = 5; // Reduced from 20 to 5 to avoid rate limits
+      for (let i = 0; i < userIds.length && allCandidates.length < maxSample; i += batchSize) {
+        const batch = userIds.slice(i, i + batchSize);
+        
+        // Process batch sequentially with delays
+        for (const userId of batch) {
+          try {
+            const key = getPlayerKey(userId);
+            const entryParams = buildEntryParams(key);
+            
+            // Use rate-limited request with retry logic
+            const playerResponse = await makeRateLimitedRequest(async () => {
+              return await axios.get(getV1EntryUrl(), {
+                headers: getHeaders(),
+                params: entryParams,
+                validateStatus: (status) => status < 500,
+              });
+            });
+
+            if (playerResponse.status === 404) {
+              continue; // Skip 404s
+            }
+
+            let data = playerResponse.data;
+            try {
+              if (typeof data === 'string' && data.trim()) {
+                data = JSON.parse(data);
+              }
+            } catch (e) {
+              // Keep as raw data if not JSON
+            }
+
+            // Look for summit-related fields
+            const summit = data?.summit || 
+                          data?.summits || 
+                          data?.bestSummit || 
+                          data?.highestSummit || 
+                          data?.Summits ||
+                          data?.Summit ||
+                          0;
+
+            const summitValue = Number(summit) || 0;
+            
+            if (summitValue > 0) {
+              allCandidates.push({
+                userId,
+                summit: summitValue,
+                data
+              });
+            }
+          } catch (error) {
+            // If it's a rate limit error after retries, stop processing
+            if (error.response?.status === 429) {
+              console.error('Rate limit exceeded after retries. Stopping leaderboard fetch.');
+              break;
+            }
+            console.error(`Error fetching data for userId ${userId}:`, error.message);
+          }
+          
+          // Delay between individual requests to respect rate limits
+          await delay(200); // 200ms delay between each player request
+        }
+
+        // Longer delay between batches
+        if (i + batchSize < userIds.length) {
+          await delay(500); // 500ms delay between batches
+        }
+      }
+
+      cursor = listResponse.data?.nextPageCursor || null;
+      pagesFetched++;
+
+      if (!cursor) break;
+
+      // Longer delay between pages to avoid rate limiting
+      await delay(1000); // 1 second delay between pages
+    }
+
+    // Sort by summit value and get top N
+    const sorted = allCandidates
+      .sort((a, b) => b.summit - a.summit)
+      .slice(0, topLimit);
+
+    // Convert userIds to usernames
+    const userIdsToConvert = sorted.map(p => p.userId);
+    const usernames = await getUsernamesFromUserIds(userIdsToConvert);
+
+    // Combine with usernames
+    const leaderboard = sorted.map((player, index) => ({
+      rank: index + 1,
+      username: usernames[index] || player.userId,
+      userId: player.userId,
+      summit: player.summit,
+    }));
+
+    res.json({
+      success: true,
+      data: {
+        leaderboard,
+        sampleSize: allCandidates.length,
+        totalSampled: allCandidates.length,
+        note: `Leaderboard based on sample of ${allCandidates.length} players from ${pagesFetched} pages`
+      }
+    });
+  } catch (error) {
+    console.error('Leaderboard API error:', error);
+    
+    let errorMessage = 'Failed to fetch leaderboard';
+    if (error.response?.data) {
+      errorMessage = error.response.data.message || 
+                    error.response.data.error || 
+                    error.response.data.errorMessage ||
+                    JSON.stringify(error.response.data);
+    }
+
     res.status(error.response?.status || 500).json({
       success: false,
       error: errorMessage,

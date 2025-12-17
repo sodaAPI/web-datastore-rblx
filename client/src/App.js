@@ -59,6 +59,46 @@ const IconColorPicker = () => (
   </svg>
 );
 
+const IconSearch = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="11" cy="11" r="8"></circle>
+    <path d="m21 21-4.35-4.35"></path>
+  </svg>
+);
+
+const IconUndo = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 7v6h6"></path>
+    <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"></path>
+  </svg>
+);
+
+const IconRedo = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 7v6h-6"></path>
+    <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13"></path>
+  </svg>
+);
+
+const IconStats = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="18" y1="20" x2="18" y2="10"></line>
+    <line x1="12" y1="20" x2="12" y2="4"></line>
+    <line x1="6" y1="20" x2="6" y2="14"></line>
+  </svg>
+);
+
+const IconTrophy = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"></path>
+    <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"></path>
+    <path d="M4 22h16"></path>
+    <path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"></path>
+    <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"></path>
+    <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"></path>
+  </svg>
+);
+
 const IconSun = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="12" cy="12" r="5"></circle>
@@ -116,6 +156,27 @@ function App() {
     const saved = localStorage.getItem('darkMode');
     return saved ? JSON.parse(saved) : false;
   });
+  
+  // Search and filter state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filteredPlayers, setFilteredPlayers] = useState([]);
+  
+  // Bulk operations state
+  const [selectedPlayers, setSelectedPlayers] = useState(new Set());
+  const [bulkLoading, setBulkLoading] = useState(false);
+  
+  // Undo/redo state for JSON editor
+  const [jsonHistory, setJsonHistory] = useState([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  
+  // Statistics state
+  const [statistics, setStatistics] = useState(null);
+  const [statsLoading, setStatsLoading] = useState(false);
+  
+  // Leaderboard state
+  const [leaderboard, setLeaderboard] = useState([]);
+  const [leaderboardLoading, setLeaderboardLoading] = useState(false);
+  const [leaderboardSampleInfo, setLeaderboardSampleInfo] = useState(null);
   
   // Nametag prefix state
   const [nametagUsername, setNametagUsername] = useState('');
@@ -335,7 +396,11 @@ function App() {
         valueData = {};
       }
       
-      setDataJson(JSON.stringify(valueData, null, 2));
+      const jsonString = JSON.stringify(valueData, null, 2);
+      setDataJson(jsonString);
+      // Initialize history with current data
+      setJsonHistory([jsonString]);
+      setHistoryIndex(0);
       setSuccess('Player data retrieved successfully!');
     } catch (err) {
       console.error('Read error:', err);
@@ -469,24 +534,253 @@ function App() {
     }
   };
 
-  const handleListPlayers = async (cursor = null) => {
+  const handleListPlayers = async (cursor = null, append = false) => {
     setLoading(true);
     setError('');
     setSuccess('');
 
     try {
-      const params = cursor ? { cursor } : {};
+      const params = cursor ? { cursor, limit: 100 } : { limit: 100 };
       const response = await axios.get(`${API_BASE_URL}/api/players`, { params });
       // Keys are now usernames (converted from userIds on server)
       const usernames = response.data.data?.keys || response.data.data?.dataStoreEntries?.map(e => e.id) || [];
-      setPlayersList(usernames);
+      
+      if (append && cursor) {
+        // Append to existing list when loading more
+        setPlayersList(prev => [...prev, ...usernames]);
+        setFilteredPlayers(prev => [...prev, ...usernames]);
+      } else {
+        // Replace list when starting fresh
+        setPlayersList(usernames);
+        setFilteredPlayers(usernames);
+      }
+      
       setListCursor(response.data.data?.nextPageToken || response.data.data?.nextPageCursor || null);
       setShowList(true);
-      setSuccess('Players list retrieved successfully!');
+      setSuccess(`Loaded ${usernames.length} players${append ? ' (more)' : ''}. ${cursor ? 'Note: With 1M+ entries, use search to find specific players.' : ''}`);
     } catch (err) {
       setError(err.response?.data?.error || err.message || 'Failed to list players');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Search and filter functionality
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setFilteredPlayers(playersList);
+      return;
+    }
+    
+    const filtered = playersList.filter(player => 
+      player.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+    setFilteredPlayers(filtered);
+  }, [searchQuery, playersList]);
+
+  // Undo/redo functionality for JSON editor
+  const isUndoRedoRef = useRef(false);
+  
+  const saveToHistory = (jsonValue) => {
+    if (isUndoRedoRef.current) {
+      isUndoRedoRef.current = false;
+      return;
+    }
+    
+    const newHistory = jsonHistory.slice(0, historyIndex + 1);
+    newHistory.push(jsonValue);
+    if (newHistory.length > 50) {
+      newHistory.shift();
+    } else {
+      setHistoryIndex(newHistory.length - 1);
+    }
+    setJsonHistory(newHistory);
+  };
+
+  const handleUndo = () => {
+    if (historyIndex > 0) {
+      isUndoRedoRef.current = true;
+      const newIndex = historyIndex - 1;
+      setHistoryIndex(newIndex);
+      setDataJson(jsonHistory[newIndex]);
+    }
+  };
+
+  const handleRedo = () => {
+    if (historyIndex < jsonHistory.length - 1) {
+      isUndoRedoRef.current = true;
+      const newIndex = historyIndex + 1;
+      setHistoryIndex(newIndex);
+      setDataJson(jsonHistory[newIndex]);
+    }
+  };
+
+  // Save to history when dataJson changes (debounced)
+  useEffect(() => {
+    if (dataJson && jsonHistory.length > 0 && jsonHistory[historyIndex] !== dataJson && !isUndoRedoRef.current) {
+      const timer = setTimeout(() => {
+        saveToHistory(dataJson);
+      }, 1000); // Debounce 1 second
+      return () => clearTimeout(timer);
+    }
+  }, [dataJson]);
+
+  // Keyboard shortcuts for undo/redo (only in textarea)
+  useEffect(() => {
+    const textarea = document.querySelector('.textarea');
+    if (!textarea) return;
+    
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey && e.target === textarea) {
+        e.preventDefault();
+        handleUndo();
+      } else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey)) && e.target === textarea) {
+        e.preventDefault();
+        handleRedo();
+      }
+    };
+    
+    textarea.addEventListener('keydown', handleKeyDown);
+    return () => textarea.removeEventListener('keydown', handleKeyDown);
+  }, [historyIndex, jsonHistory]);
+
+  // Bulk operations
+  const handleToggleSelectPlayer = (username) => {
+    const newSelected = new Set(selectedPlayers);
+    if (newSelected.has(username)) {
+      newSelected.delete(username);
+    } else {
+      newSelected.add(username);
+    }
+    setSelectedPlayers(newSelected);
+  };
+
+  const handleSelectAll = () => {
+    if (selectedPlayers.size === filteredPlayers.length) {
+      setSelectedPlayers(new Set());
+    } else {
+      setSelectedPlayers(new Set(filteredPlayers));
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedPlayers.size === 0) {
+      setError('No players selected');
+      return;
+    }
+
+    if (!window.confirm(`Are you sure you want to delete ${selectedPlayers.size} player(s)?`)) {
+      return;
+    }
+
+    setBulkLoading(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      const deletePromises = Array.from(selectedPlayers).map(username =>
+        axios.delete(`${API_BASE_URL}/api/players/${username}`).catch(err => ({ error: err, username }))
+      );
+      
+      const results = await Promise.all(deletePromises);
+      const errors = results.filter(r => r.error);
+      
+      if (errors.length > 0) {
+        setError(`Failed to delete ${errors.length} player(s)`);
+      } else {
+        setSuccess(`Successfully deleted ${selectedPlayers.size} player(s)!`);
+      }
+      
+      setSelectedPlayers(new Set());
+      handleListPlayers(); // Refresh list
+    } catch (err) {
+      setError(err.response?.data?.error || err.message || 'Failed to delete players');
+    } finally {
+      setBulkLoading(false);
+    }
+  };
+
+  // Statistics dashboard - optimized for large datasets
+  const fetchStatistics = async () => {
+    setStatsLoading(true);
+    try {
+      // For 1M+ entries, we'll sample the first page only
+      const response = await axios.get(`${API_BASE_URL}/api/players`, { params: { limit: 100 } });
+      const samplePlayers = response.data.data?.keys || [];
+      
+      // Sample a smaller subset for data validation
+      const sampleSize = Math.min(20, samplePlayers.length);
+      const playerDataPromises = samplePlayers.slice(0, sampleSize).map(async (username) => {
+        try {
+          const playerResponse = await axios.get(`${API_BASE_URL}/api/players/${username}`);
+          return { username, data: playerResponse.data?.data };
+        } catch {
+          return { username, data: null };
+        }
+      });
+      
+      const playerDataList = await Promise.all(playerDataPromises);
+      const validData = playerDataList.filter(p => p.data);
+      const dataPercentage = sampleSize > 0 ? Math.round((validData.length / sampleSize) * 100) : 0;
+      
+      // Estimate total based on sample
+      setStatistics({
+        totalPlayers: '1M+',
+        estimatedTotal: 1000000,
+        playersWithData: validData.length,
+        sampleSize: sampleSize,
+        dataPercentage: dataPercentage,
+        note: 'Statistics are estimated from a sample due to large dataset size'
+      });
+    } catch (err) {
+      console.error('Failed to fetch statistics:', err);
+      setError('Failed to fetch statistics. The dataset may be too large.');
+    } finally {
+      setStatsLoading(false);
+    }
+  };
+
+  // Leaderboard for top 10 summits - uses dedicated API endpoint with caching
+  const fetchLeaderboard = async (force = false) => {
+    setLeaderboardLoading(true);
+    setError('');
+    setSuccess('');
+    try {
+      // Use dedicated leaderboard API endpoint with caching
+      // Cached for 10 minutes, so we can use larger sample sizes without hitting rate limits
+      const response = await axios.get(`${API_BASE_URL}/api/leaderboard`, {
+        params: {
+          limit: 10,
+          sampleSize: 2000, // Increased to 2000 - cached so no rate limit issues
+          forceRefresh: force
+        }
+      });
+      
+      if (response.data.success && response.data.data) {
+        const leaderboardData = response.data.data.leaderboard || [];
+        setLeaderboard(leaderboardData.map(p => ({
+          username: p.username,
+          summit: p.summit,
+          rank: p.rank
+        })));
+        setLeaderboardSampleInfo(response.data.data);
+        
+        if (leaderboardData.length === 0) {
+          setError('No summit data found. Make sure player data contains "summit", "summits", "bestSummit", "highestSummit", or "Summits" field.');
+        } else {
+          const cacheInfo = response.data.data.cached 
+            ? ` (from cache, ${Math.round(response.data.data.cacheAge / 60)} min old)`
+            : ' (fresh data)';
+          setSuccess(`Leaderboard loaded! Sampled ${response.data.data.sampleSize} players${cacheInfo}.`);
+        }
+      } else {
+        setError('Failed to fetch leaderboard data');
+      }
+    } catch (err) {
+      console.error('Failed to fetch leaderboard:', err);
+      setError(err.response?.data?.error || err.message || 'Failed to fetch leaderboard');
+    } finally {
+      setLeaderboardLoading(false);
     }
   };
 
@@ -790,59 +1084,164 @@ function App() {
           </div>
 
           <div className="card">
-            <h2>Player Data (JSON)</h2>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h2 style={{ margin: 0 }}>Player Data (JSON)</h2>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  onClick={handleUndo}
+                  disabled={historyIndex <= 0}
+                  className="btn btn-secondary"
+                  style={{ padding: '6px 12px', fontSize: '0.75rem', minWidth: 'auto', marginTop: 0 }}
+                  title="Undo (Ctrl+Z)"
+                >
+                  <IconUndo />
+                </button>
+                <button
+                  onClick={handleRedo}
+                  disabled={historyIndex >= jsonHistory.length - 1}
+                  className="btn btn-secondary"
+                  style={{ padding: '6px 12px', fontSize: '0.75rem', minWidth: 'auto', marginTop: 0 }}
+                  title="Redo (Ctrl+Y)"
+                >
+                  <IconRedo />
+                </button>
+              </div>
+            </div>
             <textarea
               value={dataJson}
               onChange={(e) => setDataJson(e.target.value)}
-              placeholder='Enter JSON data (e.g., {"coins": 100, "level": 5})'
+              placeholder='Enter JSON data (e.g., {"Summits": 100, "Checkpoints": 5})'
               className="textarea"
               rows="15"
             />
             <p className="help-text">
-              <IconInfo /> Tip: Use "Read" to load existing data, or enter new JSON data to create/update
+              <IconInfo /> Tip: Use "Read" to load existing data, or enter new JSON data to create/update. Use undo/redo buttons to navigate history.
             </p>
           </div>
 
           <div className="card">
             <h2>List All Players</h2>
-            <button 
-              onClick={() => handleListPlayers()} 
-              disabled={loading}
-              className="btn btn-info"
-            >
-              {loading ? 'Loading...' : (
-                <>
-                  <IconList /> List Players
-                </>
-              )}
-            </button>
+            <p className="help-text" style={{ marginBottom: '15px', fontSize: '0.8125rem', padding: '10px', background: 'var(--bg-tertiary)', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+              <IconInfo /> <strong>Large Dataset:</strong> Your datastore contains 1M+ entries. Use search to find specific players. Loading all entries is not recommended.
+            </p>
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
+              <button 
+                onClick={() => {
+                  setPlayersList([]);
+                  setFilteredPlayers([]);
+                  setSearchQuery('');
+                  handleListPlayers();
+                }} 
+                disabled={loading}
+                className="btn btn-info"
+                style={{ flex: 1 }}
+              >
+                {loading ? 'Loading...' : (
+                  <>
+                    <IconList /> Load First 100 Players
+                  </>
+                )}
+              </button>
+            </div>
 
             {showList && playersList.length > 0 && (
               <div className="players-list">
-                <h3>Players ({playersList.length})</h3>
-                <div className="players-grid">
-                  {playersList.map((key, index) => (
-                    <div 
-                      key={index} 
-                      className="player-item"
-                      onClick={() => handleSelectPlayer(key)}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', flexWrap: 'wrap', gap: '10px' }}>
+                  <h3 style={{ margin: 0 }}>Players ({filteredPlayers.length} of {playersList.length})</h3>
+                  {selectedPlayers.size > 0 && (
+                    <button
+                      onClick={handleBulkDelete}
+                      disabled={bulkLoading}
+                      className="btn btn-danger"
+                      style={{ padding: '6px 12px', fontSize: '0.75rem', marginTop: 0 }}
                     >
-                      {key}
-                    </div>
-                  ))}
+                      {bulkLoading ? 'Deleting...' : `Delete ${selectedPlayers.size} Selected`}
+                    </button>
+                  )}
                 </div>
+                
+                <div style={{ position: 'relative', marginBottom: '15px' }}>
+                  <IconSearch style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search players..."
+                    className="input"
+                    style={{ paddingLeft: '40px' }}
+                  />
+                </div>
+
+                {selectedPlayers.size > 0 && (
+                  <div style={{ marginBottom: '10px', display: 'flex', gap: '10px', alignItems: 'center' }}>
+                    <button
+                      onClick={handleSelectAll}
+                      className="btn btn-secondary"
+                      style={{ padding: '6px 12px', fontSize: '0.75rem', marginTop: 0 }}
+                    >
+                      {selectedPlayers.size === filteredPlayers.length ? 'Deselect All' : 'Select All'}
+                    </button>
+                    <span style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                      {selectedPlayers.size} selected
+                    </span>
+                  </div>
+                )}
+
+                {loading && filteredPlayers.length === 0 ? (
+                  <div className="skeleton-loader">
+                    {[...Array(6)].map((_, i) => (
+                      <div key={i} className="skeleton-item" />
+                    ))}
+                  </div>
+                ) : filteredPlayers.length > 0 ? (
+                  <div className="players-grid">
+                    {filteredPlayers.map((key, index) => (
+                      <div 
+                        key={index} 
+                        className={`player-item ${selectedPlayers.has(key) ? 'selected' : ''}`}
+                        onClick={(e) => {
+                          if (e.target.type === 'checkbox') return;
+                          handleSelectPlayer(key);
+                        }}
+                        style={{ position: 'relative', cursor: 'pointer' }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedPlayers.has(key)}
+                          onChange={() => handleToggleSelectPlayer(key)}
+                          onClick={(e) => e.stopPropagation()}
+                          style={{ position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', cursor: 'pointer' }}
+                        />
+                        <span style={{ marginLeft: selectedPlayers.has(key) ? '24px' : '0' }}>{key}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="no-data">No players found matching "{searchQuery}"</p>
+                )}
+
                 {listCursor && (
-                  <button 
-                    onClick={() => handleListPlayers(listCursor)} 
-                    disabled={loading}
-                    className="btn btn-secondary"
-                    style={{ marginTop: 0 }}
-                  >
-                    Load More
-                  </button>
+                  <div style={{ marginTop: '15px', display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <button 
+                      onClick={() => handleListPlayers(listCursor, true)} 
+                      disabled={loading}
+                      className="btn btn-secondary"
+                      style={{ marginTop: 0 }}
+                    >
+                      {loading ? 'Loading...' : 'Load More (100)'}
+                    </button>
+                    <span style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                      Loaded {playersList.length} players
+                    </span>
+                    {playersList.length >= 1000 && (
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', fontStyle: 'italic' }}>
+                        Tip: Use search to find specific players instead of loading all
+                      </span>
+                    )}
+                  </div>
                 )}
                 <p className="help-text" style={{ marginTop: '10px', fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
-                  <IconInfo /> Click on any player to load their data
+                  <IconInfo /> Click on any player to load their data. Use checkboxes for bulk operations.
                 </p>
               </div>
             )}
@@ -858,6 +1257,160 @@ function App() {
               <pre className="data-preview">{JSON.stringify(playerData, null, 2)}</pre>
             </div>
           )}
+
+          {/* Statistics Dashboard */}
+          <div className="card">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h2 style={{ margin: 0 }}>Statistics Dashboard</h2>
+              <button
+                onClick={fetchStatistics}
+                disabled={statsLoading}
+                className="btn btn-secondary"
+                style={{ padding: '6px 12px', fontSize: '0.75rem', marginTop: 0 }}
+              >
+                {statsLoading ? 'Loading...' : (
+                  <>
+                    <IconStats /> Refresh
+                  </>
+                )}
+              </button>
+            </div>
+            {statsLoading ? (
+              <div className="skeleton-loader">
+                <div className="skeleton-item" style={{ height: '60px' }} />
+                <div className="skeleton-item" style={{ height: '60px' }} />
+                <div className="skeleton-item" style={{ height: '60px' }} />
+              </div>
+            ) : statistics ? (
+              <>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '15px', marginBottom: '15px' }}>
+                  <div style={{ padding: '15px', background: 'var(--bg-tertiary)', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                    <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '5px' }}>Total Players</div>
+                    <div style={{ fontSize: '1.5rem', fontWeight: 600, color: 'var(--text-primary)' }}>{statistics.totalPlayers}</div>
+                  </div>
+                  <div style={{ padding: '15px', background: 'var(--bg-tertiary)', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                    <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '5px' }}>With Data</div>
+                    <div style={{ fontSize: '1.5rem', fontWeight: 600, color: 'var(--text-primary)' }}>{statistics.playersWithData}/{statistics.sampleSize}</div>
+                  </div>
+                  <div style={{ padding: '15px', background: 'var(--bg-tertiary)', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                    <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '5px' }}>Data %</div>
+                    <div style={{ fontSize: '1.5rem', fontWeight: 600, color: 'var(--text-primary)' }}>{statistics.dataPercentage}%</div>
+                  </div>
+                </div>
+                {statistics.note && (
+                  <p className="help-text" style={{ fontSize: '0.75rem', marginTop: '10px' }}>
+                    <IconInfo /> {statistics.note}
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="help-text">Click "Refresh" to load statistics (estimated from sample)</p>
+            )}
+          </div>
+
+          {/* Leaderboard */}
+          <div className="card">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h2 style={{ margin: 0 }}>Top 10 Summits Leaderboard</h2>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  onClick={() => fetchLeaderboard(false)}
+                  disabled={leaderboardLoading}
+                  className="btn btn-secondary"
+                  style={{ padding: '6px 12px', fontSize: '0.75rem', marginTop: 0 }}
+                >
+                  {leaderboardLoading ? 'Loading...' : (
+                    <>
+                      <IconTrophy /> Refresh
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={() => fetchLeaderboard(true)}
+                  disabled={leaderboardLoading}
+                  className="btn"
+                  style={{ padding: '6px 12px', fontSize: '0.75rem', marginTop: 0 }}
+                  title="Force refresh (bypasses cache)"
+                >
+                  Force Refresh
+                </button>
+              </div>
+            </div>
+            {leaderboardLoading ? (
+              <div className="skeleton-loader">
+                {[...Array(10)].map((_, i) => (
+                  <div key={i} className="skeleton-item" style={{ height: '40px' }} />
+                ))}
+              </div>
+            ) : leaderboard.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {leaderboard.map((player, index) => (
+                  <div
+                    key={index}
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      padding: '12px',
+                      background: index < 3 ? 'var(--bg-tertiary)' : 'transparent',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border-color)',
+                      cursor: 'pointer'
+                    }}
+                    onClick={() => {
+                      setUsername(player.username);
+                      handleRead();
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = 'var(--bg-hover)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = index < 3 ? 'var(--bg-tertiary)' : 'transparent';
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <span style={{
+                        width: '24px',
+                        height: '24px',
+                        borderRadius: '50%',
+                        background: index === 0 ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)' :
+                                   index === 1 ? 'linear-gradient(135deg, #71717a 0%, #52525b 100%)' :
+                                   index === 2 ? 'linear-gradient(135deg, #b45309 0%, #92400e 100%)' :
+                                   'var(--bg-tertiary)',
+                        color: 'white',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '0.75rem',
+                        fontWeight: 600
+                      }}>
+                        {index + 1}
+                      </span>
+                      <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{player.username}</span>
+                    </div>
+                    <span style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '1.1rem' }}>
+                      {player.summit.toLocaleString()}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div>
+                <p className="help-text">Click "Refresh" to load leaderboard. Results are cached for 10 minutes to avoid rate limits.</p>
+                <p className="help-text" style={{ fontSize: '0.75rem', marginTop: '5px', color: 'var(--text-secondary)' }}>
+                  First load may take 1-2 minutes. Subsequent loads are instant from cache. Use "Force Refresh" to bypass cache.
+                </p>
+                <p className="help-text" style={{ fontSize: '0.75rem', marginTop: '5px' }}>
+                  Make sure player data contains "summit", "summits", "bestSummit", "highestSummit", or "Summits" field.
+                </p>
+              </div>
+            )}
+            {leaderboardSampleInfo && (
+              <p className="help-text" style={{ fontSize: '0.75rem', marginTop: '10px', fontStyle: 'italic' }}>
+                {leaderboardSampleInfo.note}
+              </p>
+            )}
+          </div>
 
           <div className="card" style={{ marginTop: '30px', borderTop: '1px solid rgba(0, 0, 0, 0.1)' }}>
             <h2>Nametag Prefix Operations</h2>

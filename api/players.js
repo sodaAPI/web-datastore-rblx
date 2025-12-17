@@ -38,12 +38,14 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const { cursor, limit = 50 } = req.query;
+    const { cursor, limit = 100 } = req.query;
+    // Cap limit at 100 for performance with large datasets
+    const cappedLimit = Math.min(parseInt(limit) || 100, 100);
     
     const params = {
       datastoreName: DATASTORE_NAME,
       scope: SCOPE,
-      limit,
+      limit: cappedLimit,
       cursor,
     };
     
